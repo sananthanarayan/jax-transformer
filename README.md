@@ -1,4 +1,4 @@
-# jax-addition-transformer
+# jax transformer
 
 A ~10M-parameter decoder-only transformer in [JAX](https://github.com/google/jax) +
 [Flax NNX](https://flax.readthedocs.io/en/latest/nnx_basics.html) that learns to add
