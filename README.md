@@ -1,8 +1,12 @@
 # jax transformer
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sananthanarayan/jax-transformer/blob/main/notebooks/length_generalization.ipynb)
+
 A ~10M-parameter decoder-only transformer in [JAX](https://github.com/google/jax) +
 [Flax NNX](https://flax.readthedocs.io/en/latest/nnx_basics.html) that learns to add
-(and then multiply) up-to-3-digit numbers from scratch.
+(and then multiply) up-to-3-digit numbers from scratch — and a length-generalization
+experiment showing why learned positional embeddings fall off a cliff outside the
+training distribution.
 
 The whole thing is small enough to train in a few minutes on a single 14 GB GPU
 (e.g. Colab T4 / L4) and is meant as a clean, hackable starting point for
@@ -55,16 +59,60 @@ python -m addition_transformer.train --op multiplication
 
 CPU also works for addition but is slow; expect ~30 min on a modern laptop.
 
+### Reproducing the length-generalization figure
+
+```bash
+make figures        # full sweep + plot (~10-20 min on a 14 GB GPU)
+make quick          # 2-epoch sanity sweep (~2-5 min)
+bash scripts/reproduce.sh   # same as `make figures`, also works without make
+```
+
+The headline chart lands at `results/length_gen.png`; raw numbers are written to
+`results/sweep.json` so a forker can re-plot without retraining.
+
+## Length generalization (the headline experiment)
+
+Train a model on operands with ≤3 digits, then test it on operands with 1–6 digits.
+Three variants are compared, all on the same architecture and training schedule:
+
+| Variant | Positional encoding | Answer order |
+| --- | --- | --- |
+| `baseline` | learned | natural (`579`) |
+| `reversed` | learned | reversed (`975`) |
+| `nope` | none | reversed |
+
+The expected shape:
+
+- **`baseline`** cliffs at 4 digits. Learned PE entries at positions never used during
+  training stay at random initialization (PAD positions are causally inaccessible and
+  loss-masked, so no gradient reaches them), and the model has no way to extrapolate.
+- **`reversed`** improves in-distribution accuracy noticeably (carries flow with the
+  causal direction) but still cliffs at 4 digits for the same PE reason.
+- **`nope`** has no positional embeddings at all. The model leans on the causal-mask
+  asymmetry alone — which, per [Kazemnejad et al. 2023](https://arxiv.org/abs/2305.19466),
+  extrapolates further than learned PE.
+
+Run `make figures` to produce the chart for yourself; the [Colab notebook](notebooks/length_generalization.ipynb)
+is the one-click version.
+
 ## Project layout
 
 ```
 src/addition_transformer/
   vocab.py        # token table, encode/decode
-  data.py         # dataset generation + batching
-  model.py        # Flax NNX transformer
-  train.py        # training loop + eval + CLI
+  data.py         # dataset generation, sampled OOD pairs, length helpers
+  model.py        # Flax NNX transformer (learned PE or NoPE)
+  train.py        # training loop + greedy eval + CLI
+  eval.py         # length-generalization evaluation
 scripts/
   smoke_test.py   # builds the model, prints param count, runs one forward pass
+  run_sweep.py    # trains the three variants, writes results/sweep.json
+  plot.py         # produces results/length_gen.png
+  reproduce.sh    # install + sweep + plot, end-to-end
+notebooks/
+  length_generalization.ipynb   # Colab-friendly version of the sweep
+results/                          # generated figures + raw JSON
+Makefile                          # make figures | quick | smoke | train | clean
 ```
 
 ## Why these choices?

@@ -16,6 +16,7 @@ dependencies = [
   "optax>=0.2.3",
   "numpy>=1.26",
   "tqdm>=4.66",
+  "matplotlib>=3.8",
 ]
 
 [tool.setuptools.packages.find]

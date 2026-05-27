@@ -11,6 +11,7 @@ Architectural notes:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -18,16 +19,19 @@ from flax import nnx
 
 from .vocab import VOCAB_SIZE
 
+PosEncoding = Literal["learned", "none"]
+
 
 @dataclass(frozen=True)
 class TransformerConfig:
     vocab_size: int = VOCAB_SIZE
-    max_len: int = 20
+    max_len: int = 32
     d_model: int = 384
     n_layers: int = 6
     n_heads: int = 6
     d_ff: int = 1536
     dropout: float = 0.0
+    pos_encoding: PosEncoding = "learned"
 
 
 class CausalSelfAttention(nnx.Module):
@@ -81,7 +85,10 @@ class Transformer(nnx.Module):
     def __init__(self, cfg: TransformerConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.tok_emb = nnx.Embed(cfg.vocab_size, cfg.d_model, rngs=rngs)
-        self.pos_emb = nnx.Embed(cfg.max_len, cfg.d_model, rngs=rngs)
+        if cfg.pos_encoding == "learned":
+            self.pos_emb = nnx.Embed(cfg.max_len, cfg.d_model, rngs=rngs)
+        else:
+            self.pos_emb = None
         self.blocks = nnx.List([Block(cfg, rngs=rngs) for _ in range(cfg.n_layers)])
         self.ln_f = nnx.RMSNorm(cfg.d_model, rngs=rngs)
         self.head = nnx.Linear(cfg.d_model, cfg.vocab_size, use_bias=False, rngs=rngs)
@@ -89,8 +96,10 @@ class Transformer(nnx.Module):
     def __call__(self, ids: jax.Array) -> jax.Array:
         """ids: (B, T) int32 -> logits: (B, T, vocab_size)."""
         B, T = ids.shape
-        pos = jnp.arange(T)
-        x = self.tok_emb(ids) + self.pos_emb(pos)[None, :, :]
+        x = self.tok_emb(ids)
+        if self.pos_emb is not None:
+            pos = jnp.arange(T)
+            x = x + self.pos_emb(pos)[None, :, :]
         for block in self.blocks:
             x = block(x)
         x = self.ln_f(x)

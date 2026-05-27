@@ -4,3 +4,4 @@ flax>=0.10.0
 optax>=0.2.3
 numpy>=1.26
 tqdm>=4.66
+matplotlib>=3.8

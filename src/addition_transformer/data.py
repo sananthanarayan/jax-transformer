@@ -30,6 +30,17 @@ Op = Literal["addition", "multiplication"]
 MAX_LEN = 20
 
 
+def max_len_for(op: Op, max_digits: int) -> int:
+    """Sequence length needed for the longest example at ``max_digits``, plus a PAD/EOS slot.
+
+    Addition results have at most ``max_digits + 1`` digits; multiplication has at
+    most ``2 * max_digits``. The fixed scaffolding ``" + "`` / ``" * "`` / ``" = "``
+    contributes 6 characters.
+    """
+    result_chars = max_digits + 1 if op == "addition" else 2 * max_digits
+    return 2 * max_digits + result_chars + 6 + 1
+
+
 @dataclass(frozen=True)
 class Example:
     input_ids: np.ndarray   # (T,) int32
@@ -101,6 +112,26 @@ def generate_pairs(
     # Sanity: multiplication of 999*999 = 998001 still fits in MAX_LEN.
     _ = op
     return pairs
+
+
+def sample_pairs_at_digits(
+    digits: int, n: int, *, seed: int = 0
+) -> np.ndarray:
+    """Sample ``n`` random (a, b) pairs where both operands have exactly ``digits`` digits.
+
+    ``digits=1`` means operands in [0, 10); for larger ``digits``, operands are in
+    [10**(digits-1), 10**digits) so they are strictly ``digits``-digit numbers.
+    Used for length-generalization evaluation, where the 6-digit grid (10**12 pairs)
+    is too large to enumerate.
+    """
+    if digits < 1:
+        raise ValueError(f"digits must be >= 1, got {digits}")
+    lo = 0 if digits == 1 else 10 ** (digits - 1)
+    hi = 10**digits
+    rng = np.random.default_rng(seed)
+    a = rng.integers(lo, hi, size=n)
+    b = rng.integers(lo, hi, size=n)
+    return np.stack([a, b], axis=1)
 
 
 def build_arrays(
