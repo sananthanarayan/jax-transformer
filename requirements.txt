@@ -1,0 +1,6 @@
+jax>=0.4.30
+jaxlib>=0.4.30
+flax>=0.10.0
+optax>=0.2.3
+numpy>=1.26
+tqdm>=4.66

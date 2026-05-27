@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "addition-transformer"
+version = "0.1.0"
+description = "A ~10M JAX/Flax NNX transformer that learns arithmetic from scratch."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+  "jax>=0.4.30",
+  "jaxlib>=0.4.30",
+  "flax>=0.10.0",
+  "optax>=0.2.3",
+  "numpy>=1.26",
+  "tqdm>=4.66",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
