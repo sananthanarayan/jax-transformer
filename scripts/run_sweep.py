@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--eval-samples", type=int, default=500)
     p.add_argument("--mixed-n-samples", type=int, default=1_000_000,
                    help="Training samples for the abacus_curriculum variant.")
+    p.add_argument("--train-subsample", type=int, default=None,
+                   help="Cap training data at this many pairs (for fast iteration).")
     p.add_argument("--variants", default=None,
                    help="Comma-separated subset of variant names to run.")
     p.add_argument("--output", type=pathlib.Path,
@@ -123,6 +125,7 @@ def main(argv: list[str] | None = None) -> None:
             mixed_digits=v["mixed_digits"],
             mixed_min_digits=1,
             mixed_n_samples=args.mixed_n_samples,
+            train_subsample=args.train_subsample,
             log_prefix=prefix,
         )
         train_time = time.time() - t0

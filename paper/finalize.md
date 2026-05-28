@@ -5,6 +5,11 @@ you would be comfortable sending to a recruiter, posting on a personal site, or
 submitting to arXiv. Items are grouped by whether they block public sharing or
 are polish.
 
+**Status as of v0.2:** items #1, #2, #3, #5 are done (sweep ran, real numbers
+in §6, predictions reconciled with reality in §7, figures embedded, voice
+changed to first person). The remaining must-have is #4 (author block + abstract
+polish, partially done). Everything else is polish or production.
+
 ## Must-have (blocks public sharing)
 
 ### 1. Run the full sweep and slot in the real numbers

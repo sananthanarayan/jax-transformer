@@ -201,6 +201,7 @@ def train_model(
     mixed_digits: bool = False,
     mixed_min_digits: int = 1,
     mixed_n_samples: int = 1_000_000,
+    train_subsample: int | None = None,
     log_prefix: str = "",
     verbose: bool = True,
 ) -> Transformer:
@@ -227,6 +228,12 @@ def train_model(
         )
     else:
         pairs = generate_pairs(op, max_digits=max_digits, seed=seed)
+    if train_subsample is not None and train_subsample < len(pairs):
+        idx = np.random.default_rng(seed + 12345).choice(
+            len(pairs), size=train_subsample, replace=False
+        )
+        pairs = pairs[idx]
+        log(f"[data]  subsampled to {len(pairs):,} pairs")
     train_pairs, val_pairs = split(pairs, val_frac=val_frac)
     log(f"[data]  train={len(train_pairs):,}  val={len(val_pairs):,}")
 
