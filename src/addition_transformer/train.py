@@ -17,7 +17,17 @@ import optax
 from flax import nnx
 from tqdm import tqdm
 
-from .data import MAX_LEN, Op, build_arrays, generate_pairs, max_len_for, render, split
+from .data import (
+    MAX_LEN,
+    Op,
+    build_arrays,
+    compute_digit_positions_for_decode,
+    generate_mixed_pairs,
+    generate_pairs,
+    max_len_for,
+    render,
+    split,
+)
 from .model import PosEncoding, Transformer, TransformerConfig, count_params
 from .vocab import PAD_ID, VOCAB, encode
 
@@ -28,8 +38,8 @@ from .vocab import PAD_ID, VOCAB, encode
 
 
 def loss_fn(model: Transformer, batch):
-    input_ids, targets, loss_mask = batch
-    logits = model(input_ids)
+    input_ids, targets, loss_mask, digit_positions = batch
+    logits = model(input_ids, digit_positions)
     log_probs = jax.nn.log_softmax(logits, axis=-1)
     tgt_log_probs = jnp.take_along_axis(
         log_probs, targets[..., None], axis=-1
@@ -45,8 +55,10 @@ def loss_fn(model: Transformer, batch):
 
 
 @nnx.jit
-def _step_logits(model: Transformer, ids: jax.Array) -> jax.Array:
-    return model(ids)
+def _step_logits(
+    model: Transformer, ids: jax.Array, digit_positions: jax.Array
+) -> jax.Array:
+    return model(ids, digit_positions)
 
 
 def greedy_generate(
@@ -54,30 +66,52 @@ def greedy_generate(
     prompt_ids: np.ndarray,
     prompt_lens: np.ndarray,
     max_len: int,
+    digit_positions: np.ndarray | None = None,
 ) -> np.ndarray:
     """Autoregressive greedy decoding, batched over variable-length prompts.
 
     Inefficient (re-runs the whole forward pass each step, no KV cache) but
-    simple — answers are <=6 tokens long so it's plenty fast.
+    simple — answers are <=8 tokens long so it's plenty fast. ``digit_positions``
+    is required for Abacus models; pass zeros (or omit) otherwise.
     """
     ids = jnp.asarray(prompt_ids)
+    if digit_positions is None:
+        digit_positions = np.zeros_like(prompt_ids, dtype=np.int32)
+    dp = jnp.asarray(digit_positions)
     prompt_lens_j = jnp.asarray(prompt_lens)
     B = ids.shape[0]
     batch_idx = jnp.arange(B)
     n_steps = max_len - int(prompt_lens.min())
     for step in range(n_steps):
-        logits = _step_logits(model, ids)
+        logits = _step_logits(model, ids, dp)
         read_pos = prompt_lens_j + step - 1
         write_pos = prompt_lens_j + step
-        # logits at read_pos for each example
         gathered = logits[batch_idx, read_pos]   # (B, V)
         next_tok = jnp.argmax(gathered, axis=-1)
-        # only write where we still have room
         mask = write_pos < max_len
         next_tok = jnp.where(mask, next_tok, PAD_ID)
         write_pos_safe = jnp.where(mask, write_pos, 0)
         ids = ids.at[batch_idx, write_pos_safe].set(next_tok)
     return np.asarray(ids)
+
+
+def _build_eval_digit_positions(
+    prompt_ids: np.ndarray,
+    prompt_lens: np.ndarray,
+    model_max_len: int,
+    reverse_answer: bool,
+) -> np.ndarray:
+    """Per-example digit positions for greedy decoding under Abacus."""
+    B = prompt_ids.shape[0]
+    out = np.zeros((B, model_max_len), dtype=np.int32)
+    for i in range(B):
+        out[i] = compute_digit_positions_for_decode(
+            prompt_ids[i],
+            int(prompt_lens[i]),
+            model_max_len=model_max_len,
+            reverse_answer=reverse_answer,
+        )
+    return out
 
 
 def evaluate(
@@ -92,6 +126,7 @@ def evaluate(
     """Exact-match accuracy over (a, b) pairs."""
     if max_len is None:
         max_len = int(model.cfg.max_len)
+    use_abacus = model.cfg.pos_encoding == "abacus"
     correct = 0
     total = 0
     for start in range(0, len(pairs), batch_size):
@@ -108,11 +143,16 @@ def evaluate(
             expected.append(ans)
         prompt_ids = np.asarray(prompts, dtype=np.int32)
         prompt_lens_arr = np.asarray(prompt_lens, dtype=np.int32)
-        out = greedy_generate(model, prompt_ids, prompt_lens_arr, max_len)
+        if use_abacus:
+            dp = _build_eval_digit_positions(
+                prompt_ids, prompt_lens_arr, max_len, reverse_answer
+            )
+        else:
+            dp = None
+        out = greedy_generate(model, prompt_ids, prompt_lens_arr, max_len, dp)
         for i in range(B):
             plen = prompt_lens[i]
             gen = out[i, plen:]
-            # Stop at first PAD
             pad_positions = np.where(gen == PAD_ID)[0]
             cut = pad_positions[0] if len(pad_positions) else len(gen)
             generated_chars = "".join(VOCAB[int(t)] for t in gen[:cut])
@@ -158,14 +198,17 @@ def train_model(
     pos_encoding: PosEncoding = "learned",
     model_max_len: int | None = None,
     eval_samples: int = 2000,
+    mixed_digits: bool = False,
+    mixed_min_digits: int = 1,
+    mixed_n_samples: int = 1_000_000,
     log_prefix: str = "",
     verbose: bool = True,
 ) -> Transformer:
     """Train a transformer on synthetic arithmetic and return the trained model.
 
-    ``model_max_len`` sets the positional capacity of the model; defaults to whatever
-    fits ``max_digits``. For length-generalization sweeps, pass the eval-time max so
-    the model can ingest longer sequences than it was trained on.
+    With ``mixed_digits=True`` the training set is sampled uniformly across
+    operand digit counts ``[mixed_min_digits, max_digits]`` (used by the Abacus
+    length-curriculum variant so every digit-position embedding gets gradient).
     """
     if model_max_len is None:
         model_max_len = max_len_for(op, max_digits)
@@ -175,13 +218,19 @@ def train_model(
             print(f"{log_prefix}{msg}")
 
     log(f"[setup] op={op}  reverse_answer={reverse_answer}  pos_encoding={pos_encoding}  "
-        f"max_digits={max_digits}  model_max_len={model_max_len}  device={jax.devices()[0]}")
+        f"max_digits={max_digits}  mixed_digits={mixed_digits}  "
+        f"model_max_len={model_max_len}  device={jax.devices()[0]}")
 
-    pairs = generate_pairs(op, max_digits=max_digits, seed=seed)
+    if mixed_digits:
+        pairs = generate_mixed_pairs(
+            op, mixed_min_digits, max_digits, mixed_n_samples, seed=seed
+        )
+    else:
+        pairs = generate_pairs(op, max_digits=max_digits, seed=seed)
     train_pairs, val_pairs = split(pairs, val_frac=val_frac)
     log(f"[data]  train={len(train_pairs):,}  val={len(val_pairs):,}")
 
-    train_inp, train_tgt, train_mask = build_arrays(
+    train_inp, train_tgt, train_mask, train_dp = build_arrays(
         train_pairs, op, max_len=model_max_len, reverse_answer=reverse_answer
     )
 
@@ -215,6 +264,7 @@ def train_model(
                 jnp.asarray(train_inp[sel]),
                 jnp.asarray(train_tgt[sel]),
                 jnp.asarray(train_mask[sel]),
+                jnp.asarray(train_dp[sel]),
             )
             loss_val = train_step(model, optimizer, batch)
             losses.append(float(loss_val))
@@ -249,8 +299,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--val-frac", type=float, default=0.05)
     p.add_argument("--no-reverse-answer", action="store_true")
-    p.add_argument("--pos-encoding", choices=["learned", "none"], default="learned")
+    p.add_argument(
+        "--pos-encoding",
+        choices=["learned", "none", "rope", "abacus"],
+        default="learned",
+    )
     p.add_argument("--model-max-len", type=int, default=None)
+    p.add_argument("--mixed-digits", action="store_true",
+                   help="Sample training data uniformly across operand digit counts "
+                        "[1, max_digits] (used by the Abacus length curriculum).")
+    p.add_argument("--mixed-n-samples", type=int, default=1_000_000)
     p.add_argument(
         "--eval-samples",
         type=int,
@@ -276,6 +334,8 @@ def main(argv: list[str] | None = None) -> None:
         pos_encoding=args.pos_encoding,
         model_max_len=args.model_max_len,
         eval_samples=args.eval_samples,
+        mixed_digits=args.mixed_digits,
+        mixed_n_samples=args.mixed_n_samples,
     )
 
     # Qualitative samples from the validation split.
@@ -290,12 +350,14 @@ def main(argv: list[str] | None = None) -> None:
         prompts.append(encode(pr) + [PAD_ID] * (model_max_len - len(pr)))
         plens.append(len(pr))
         expected.append(ans)
-    out = greedy_generate(
-        model,
-        np.asarray(prompts, dtype=np.int32),
-        np.asarray(plens, dtype=np.int32),
-        model_max_len,
+    prompt_ids_arr = np.asarray(prompts, dtype=np.int32)
+    plens_arr = np.asarray(plens, dtype=np.int32)
+    dp = (
+        _build_eval_digit_positions(prompt_ids_arr, plens_arr, model_max_len, reverse)
+        if model.cfg.pos_encoding == "abacus"
+        else None
     )
+    out = greedy_generate(model, prompt_ids_arr, plens_arr, model_max_len, dp)
     for i, (a, b) in enumerate(show):
         gen = out[i, plens[i]:]
         pad_positions = np.where(gen == PAD_ID)[0]

@@ -53,9 +53,10 @@ def main() -> None:
 
     # --- Forward pass
     pairs = generate_pairs("addition", max_digits=3)[:8]
-    inp, tgt, mask = build_arrays(pairs, "addition")
+    inp, tgt, mask, dp = build_arrays(pairs, "addition")
     logits = model(jnp.asarray(inp))
     print(f"forward pass: input {inp.shape}  ->  logits {logits.shape}")
+    print(f"digit_positions sample: {dp[0].tolist()}")
     assert logits.shape == (8, MAX_LEN, VOCAB_SIZE)
 
     # --- Loss (manual)

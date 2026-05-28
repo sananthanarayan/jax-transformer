@@ -1,18 +1,21 @@
-"""Phase 1 length-generalization sweep.
+"""Length-generalization sweep (Phases 1 + 2).
 
-Trains three variants on 3-digit addition only:
+Trains a family of variants on small-digit addition and evaluates each on
+operand digit counts 1..N. By default we run six variants:
 
-    baseline    : learned positional embeddings, natural answer order
-    reversed    : learned positional embeddings, reversed answer order
-    nope        : no positional encoding,        reversed answer order
+    Phase 1
+      baseline           : learned PE,  natural answer order
+      reversed           : learned PE,  reversed answer order
+      nope               : no PE,       reversed answer order
+    Phase 2
+      rope               : rotary PE,                  reversed answer order
+      abacus             : digit-position PE only,     reversed answer order
+      abacus_curriculum  : digit-position PE + mixed-digit training (1..max)
 
-Each variant is then evaluated on operand digit counts 1..6 using sampled pairs.
-Results are written to ``results/sweep.json`` for the plotting script to consume.
+Pass ``--phase 1`` to skip the Phase 2 variants.
 
-Run from the repo root::
-
-    python scripts/run_sweep.py
-    python scripts/run_sweep.py --epochs 4 --eval-samples 200   # quick sanity sweep
+Results are written to ``results/sweep.json`` (per-variant overall accuracy and
+per-digit-position accuracy) and consumed by ``scripts/plot.py``.
 """
 from __future__ import annotations
 
@@ -26,57 +29,61 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "src"))
 
 from addition_transformer.data import max_len_for
-from addition_transformer.eval import eval_at_digits
+from addition_transformer.eval import eval_at_digits, per_digit_position_accuracy
 from addition_transformer.train import train_model
 
 
-VARIANTS = [
-    {
-        "name": "baseline",
-        "label": "Learned PE + natural order",
-        "pos_encoding": "learned",
-        "reverse_answer": False,
-    },
-    {
-        "name": "reversed",
-        "label": "Learned PE + reversed answers",
-        "pos_encoding": "learned",
-        "reverse_answer": True,
-    },
-    {
-        "name": "nope",
-        "label": "NoPE + reversed answers",
-        "pos_encoding": "none",
-        "reverse_answer": True,
-    },
+PHASE1_VARIANTS = [
+    {"name": "baseline", "label": "Learned PE + natural order",
+     "pos_encoding": "learned", "reverse_answer": False, "mixed_digits": False},
+    {"name": "reversed", "label": "Learned PE + reversed answers",
+     "pos_encoding": "learned", "reverse_answer": True,  "mixed_digits": False},
+    {"name": "nope",     "label": "NoPE + reversed answers",
+     "pos_encoding": "none",    "reverse_answer": True,  "mixed_digits": False},
+]
+PHASE2_VARIANTS = [
+    {"name": "rope",     "label": "RoPE + reversed answers",
+     "pos_encoding": "rope",    "reverse_answer": True,  "mixed_digits": False},
+    {"name": "abacus",   "label": "Abacus (clean) + reversed answers",
+     "pos_encoding": "abacus",  "reverse_answer": True,  "mixed_digits": False},
+    {"name": "abacus_curriculum",
+     "label": "Abacus + length curriculum (1..max digits)",
+     "pos_encoding": "abacus",  "reverse_answer": True,  "mixed_digits": True},
 ]
 
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--op", default="addition", choices=["addition", "multiplication"])
-    p.add_argument("--train-digits", type=int, default=3,
-                   help="Train on operands with up to this many digits.")
-    p.add_argument("--eval-max-digits", type=int, default=6,
-                   help="Evaluate length generalization up to this digit count.")
+    p.add_argument("--phase", type=int, default=2, choices=[1, 2],
+                   help="1 = baseline/reversed/nope only; 2 = all six variants.")
+    p.add_argument("--train-digits", type=int, default=3)
+    p.add_argument("--eval-max-digits", type=int, default=6)
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--eval-samples", type=int, default=500,
-                   help="Random pairs sampled at each eval digit count.")
+    p.add_argument("--eval-samples", type=int, default=500)
+    p.add_argument("--mixed-n-samples", type=int, default=1_000_000,
+                   help="Training samples for the abacus_curriculum variant.")
+    p.add_argument("--variants", default=None,
+                   help="Comma-separated subset of variant names to run.")
     p.add_argument("--output", type=pathlib.Path,
                    default=pathlib.Path(__file__).parent.parent / "results" / "sweep.json")
     args = p.parse_args(argv)
 
-    # The model's positional capacity must fit the longest eval sequence,
-    # not just the training distribution.
+    all_variants = PHASE1_VARIANTS + (PHASE2_VARIANTS if args.phase >= 2 else [])
+    if args.variants:
+        wanted = {v.strip() for v in args.variants.split(",")}
+        all_variants = [v for v in all_variants if v["name"] in wanted]
+
     model_max_len = max_len_for(args.op, args.eval_max_digits)
     eval_digits = list(range(1, args.eval_max_digits + 1))
 
     results: dict = {
         "config": {
             "op": args.op,
+            "phase": args.phase,
             "train_digits": args.train_digits,
             "eval_digits": eval_digits,
             "epochs": args.epochs,
@@ -85,18 +92,22 @@ def main(argv: list[str] | None = None) -> None:
             "seed": args.seed,
             "eval_samples": args.eval_samples,
             "model_max_len": model_max_len,
+            "mixed_n_samples": args.mixed_n_samples,
         },
         "variants": {},
     }
 
     t_all = time.time()
-    for v in VARIANTS:
+    for v in all_variants:
         prefix = f"[{v['name']}] "
         print(f"\n=== {v['name']}: {v['label']} ===")
         t0 = time.time()
+        # The curriculum variant trains on up to ``eval_max_digits - 1`` digits so it
+        # still has to extrapolate by one. Other variants train on ``train_digits``.
+        max_digits = (args.eval_max_digits - 1) if v["mixed_digits"] else args.train_digits
         model = train_model(
             op=args.op,
-            max_digits=args.train_digits,
+            max_digits=max_digits,
             epochs=args.epochs,
             batch_size=args.batch_size,
             lr=args.lr,
@@ -105,32 +116,44 @@ def main(argv: list[str] | None = None) -> None:
             pos_encoding=v["pos_encoding"],
             model_max_len=model_max_len,
             eval_samples=min(args.eval_samples * 2, 2000),
+            mixed_digits=v["mixed_digits"],
+            mixed_min_digits=1,
+            mixed_n_samples=args.mixed_n_samples,
             log_prefix=prefix,
         )
         train_time = time.time() - t0
 
         accs: dict[str, float] = {}
+        per_pos: dict[str, list[float | None]] = {}
         for d in eval_digits:
             acc = eval_at_digits(
-                model,
-                args.op,
-                d,
+                model, args.op, d,
                 n_samples=args.eval_samples,
                 reverse_answer=v["reverse_answer"],
                 seed=args.seed + 1000,
             )
             accs[str(d)] = acc
-            print(f"{prefix}digits={d}: acc={acc*100:.2f}%")
+            pp_acc, _ = per_digit_position_accuracy(
+                model, args.op, d,
+                n_samples=args.eval_samples,
+                reverse_answer=v["reverse_answer"],
+                seed=args.seed + 1000,
+            )
+            per_pos[str(d)] = [None if (x != x) else float(x) for x in pp_acc]
+            print(f"{prefix}digits={d}: overall={acc*100:.2f}%  "
+                  f"per-position={['{:.0%}'.format(x) if x is not None else '-' for x in per_pos[str(d)]]}")
 
         results["variants"][v["name"]] = {
             "label": v["label"],
             "pos_encoding": v["pos_encoding"],
             "reverse_answer": v["reverse_answer"],
+            "mixed_digits": v["mixed_digits"],
+            "train_max_digits": max_digits,
             "train_time_sec": train_time,
             "accuracies": accs,
+            "per_position_accuracy": per_pos,
         }
 
-        # Write after each variant so partial runs are still useful.
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(results, indent=2))
 

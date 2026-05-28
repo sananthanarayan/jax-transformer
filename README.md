@@ -62,24 +62,31 @@ CPU also works for addition but is slow; expect ~30 min on a modern laptop.
 ### Reproducing the length-generalization figure
 
 ```bash
-make figures        # full sweep + plot (~10-20 min on a 14 GB GPU)
-make quick          # 2-epoch sanity sweep (~2-5 min)
+make figures        # full 6-variant sweep + both plots (~25-40 min on a 14 GB GPU)
+make sweep-phase1   # just the 3 Phase 1 variants (~10-15 min)
+make quick          # 2-epoch sanity sweep across all variants (~5-10 min)
+make test           # unit tests for the Abacus digit-position assignment
 bash scripts/reproduce.sh   # same as `make figures`, also works without make
 ```
 
-The headline chart lands at `results/length_gen.png`; raw numbers are written to
+The headline chart lands at `results/length_gen.png` and the per-digit-position
+heatmap at `results/per_digit_heatmap.png`; raw numbers are written to
 `results/sweep.json` so a forker can re-plot without retraining.
 
 ## Length generalization (the headline experiment)
 
 Train a model on operands with ≤3 digits, then test it on operands with 1–6 digits.
-Three variants are compared, all on the same architecture and training schedule:
+Six variants are compared, all on the same architecture and training schedule
+(except where noted):
 
-| Variant | Positional encoding | Answer order |
-| --- | --- | --- |
-| `baseline` | learned | natural (`579`) |
-| `reversed` | learned | reversed (`975`) |
-| `nope` | none | reversed |
+| Variant | Positional encoding | Answer order | Training data |
+| --- | --- | --- | --- |
+| `baseline` | learned | natural (`579`) | ≤3-digit |
+| `reversed` | learned | reversed (`975`) | ≤3-digit |
+| `nope` | none | reversed | ≤3-digit |
+| `rope` | rotary ([Su et al. 2021](https://arxiv.org/abs/2104.09864)) | reversed | ≤3-digit |
+| `abacus` | digit-position only ([McLeish et al. 2024](https://arxiv.org/abs/2405.17399)) | reversed | ≤3-digit |
+| `abacus_curriculum` | digit-position only | reversed | **mixed 1..5-digit** |
 
 The expected shape:
 
@@ -91,9 +98,23 @@ The expected shape:
 - **`nope`** has no positional embeddings at all. The model leans on the causal-mask
   asymmetry alone — which, per [Kazemnejad et al. 2023](https://arxiv.org/abs/2305.19466),
   extrapolates further than learned PE.
+- **`rope`** applies position-dependent rotation to Q and K inside attention. The
+  relative-position structure of RoPE generalizes to unseen offsets in principle.
+- **`abacus`** replaces absolute position with *place value* — each digit token gets
+  an embedding indexed by "this is the k-th digit of its number, counted from the
+  ones place." Trained on 3-digit only, its place-value embeddings for positions ≥4
+  never see gradient (same failure as learned PE, just reparameterized).
+- **`abacus_curriculum`** uses the same place-value embedding, but trains on operands
+  with mixed digit counts (1..5) so every embedding gets gradient. This is the
+  variant that should actually generalize.
 
-Run `make figures` to produce the chart for yourself; the [Colab notebook](notebooks/length_generalization.ipynb)
-is the one-click version.
+Run `make figures` to produce the charts for yourself; the
+[Colab notebook](notebooks/length_generalization.ipynb) is the one-click version.
+Two figures are written:
+
+- `results/length_gen.png` — exact-match accuracy vs operand digit count, one curve per variant.
+- `results/per_digit_heatmap.png` — per-digit-position error rate, one panel per variant
+  (reveals *where* in the answer each variant fails first — typically the high-order digits).
 
 ## Project layout
 
@@ -106,13 +127,15 @@ src/addition_transformer/
   eval.py         # length-generalization evaluation
 scripts/
   smoke_test.py   # builds the model, prints param count, runs one forward pass
-  run_sweep.py    # trains the three variants, writes results/sweep.json
-  plot.py         # produces results/length_gen.png
+  run_sweep.py    # trains the variants, writes results/sweep.json
+  plot.py         # produces results/length_gen.png + results/per_digit_heatmap.png
   reproduce.sh    # install + sweep + plot, end-to-end
+tests/
+  test_digit_positions.py   # unit tests for the Abacus place-value assignment
 notebooks/
   length_generalization.ipynb   # Colab-friendly version of the sweep
 results/                          # generated figures + raw JSON
-Makefile                          # make figures | quick | smoke | train | clean
+Makefile                          # make figures | quick | smoke | test | clean
 ```
 
 ## Why these choices?

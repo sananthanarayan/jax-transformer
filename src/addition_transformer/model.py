@@ -19,7 +19,7 @@ from flax import nnx
 
 from .vocab import VOCAB_SIZE
 
-PosEncoding = Literal["learned", "none"]
+PosEncoding = Literal["learned", "none", "rope", "abacus"]
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,29 @@ class TransformerConfig:
     d_ff: int = 1536
     dropout: float = 0.0
     pos_encoding: PosEncoding = "learned"
+    max_digit_pos: int = 16  # Abacus: positions 1..max_digit_pos plus 0 for non-digit
+
+
+def _rope_table(T: int, d_head: int) -> tuple[jax.Array, jax.Array]:
+    """Standard rotary table. Returns (cos, sin) of shape (T, d_head // 2)."""
+    half = d_head // 2
+    freq_idx = jnp.arange(half, dtype=jnp.float32)
+    theta = 10000.0 ** (-2.0 * freq_idx / d_head)
+    pos = jnp.arange(T, dtype=jnp.float32)
+    angles = pos[:, None] * theta[None, :]
+    return jnp.cos(angles), jnp.sin(angles)
+
+
+def _apply_rope(x: jax.Array, cos: jax.Array, sin: jax.Array) -> jax.Array:
+    """Rotate consecutive pairs of feature dims. ``x`` is (B, H, T, D)."""
+    x_even = x[..., 0::2]
+    x_odd = x[..., 1::2]
+    cos_b = cos[None, None, :, :]
+    sin_b = sin[None, None, :, :]
+    rot_even = x_even * cos_b - x_odd * sin_b
+    rot_odd = x_even * sin_b + x_odd * cos_b
+    out = jnp.stack([rot_even, rot_odd], axis=-1)
+    return out.reshape(x.shape)
 
 
 class CausalSelfAttention(nnx.Module):
@@ -39,6 +62,7 @@ class CausalSelfAttention(nnx.Module):
         assert cfg.d_model % cfg.n_heads == 0
         self.n_heads = cfg.n_heads
         self.d_head = cfg.d_model // cfg.n_heads
+        self.use_rope = cfg.pos_encoding == "rope"
         self.qkv = nnx.Linear(cfg.d_model, 3 * cfg.d_model, use_bias=False, rngs=rngs)
         self.out = nnx.Linear(cfg.d_model, cfg.d_model, use_bias=False, rngs=rngs)
 
@@ -48,6 +72,11 @@ class CausalSelfAttention(nnx.Module):
         # (B, T, 3, H, D) -> (3, B, H, T, D)
         qkv = jnp.transpose(qkv, (2, 0, 3, 1, 4))
         q, k, v = qkv[0], qkv[1], qkv[2]
+
+        if self.use_rope:
+            cos, sin = _rope_table(T, self.d_head)
+            q = _apply_rope(q, cos, sin)
+            k = _apply_rope(k, cos, sin)
 
         scale = 1.0 / jnp.sqrt(self.d_head).astype(x.dtype)
         att = jnp.einsum("bhtd,bhsd->bhts", q, k) * scale
@@ -89,17 +118,34 @@ class Transformer(nnx.Module):
             self.pos_emb = nnx.Embed(cfg.max_len, cfg.d_model, rngs=rngs)
         else:
             self.pos_emb = None
+        if cfg.pos_encoding == "abacus":
+            self.digit_pos_emb = nnx.Embed(cfg.max_digit_pos + 1, cfg.d_model, rngs=rngs)
+        else:
+            self.digit_pos_emb = None
         self.blocks = nnx.List([Block(cfg, rngs=rngs) for _ in range(cfg.n_layers)])
         self.ln_f = nnx.RMSNorm(cfg.d_model, rngs=rngs)
         self.head = nnx.Linear(cfg.d_model, cfg.vocab_size, use_bias=False, rngs=rngs)
 
-    def __call__(self, ids: jax.Array) -> jax.Array:
-        """ids: (B, T) int32 -> logits: (B, T, vocab_size)."""
-        B, T = ids.shape
+    def __call__(
+        self,
+        ids: jax.Array,
+        digit_positions: jax.Array | None = None,
+    ) -> jax.Array:
+        """ids: (B, T) int32 -> logits: (B, T, vocab_size).
+
+        ``digit_positions`` is required when ``cfg.pos_encoding == 'abacus'`` and
+        is ignored otherwise. Each entry must be in ``[0, cfg.max_digit_pos]``,
+        with 0 reserved for non-digit tokens.
+        """
+        _, T = ids.shape
         x = self.tok_emb(ids)
         if self.pos_emb is not None:
             pos = jnp.arange(T)
             x = x + self.pos_emb(pos)[None, :, :]
+        if self.digit_pos_emb is not None:
+            if digit_positions is None:
+                raise ValueError("Abacus model requires digit_positions")
+            x = x + self.digit_pos_emb(digit_positions)
         for block in self.blocks:
             x = block(x)
         x = self.ln_f(x)
