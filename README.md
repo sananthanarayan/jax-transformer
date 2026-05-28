@@ -110,11 +110,19 @@ The expected shape:
 
 Run `make figures` to produce the charts for yourself; the
 [Colab notebook](notebooks/length_generalization.ipynb) is the one-click version.
-Two figures are written:
+Three figures are written:
 
 - `results/length_gen.png` — exact-match accuracy vs operand digit count, one curve per variant.
 - `results/per_digit_heatmap.png` — per-digit-position error rate, one panel per variant
   (reveals *where* in the answer each variant fails first — typically the high-order digits).
+- `results/embedding_drift.png` — L2 distance of each position embedding row from its
+  initialization. A row that received no gradient during training has drift exactly 0,
+  so this figure is the direct, falsifiable version of the claim that learned-PE and
+  clean-Abacus fail because the relevant embedding rows *never moved from init*.
+
+The third figure is what makes the "untrained-positions-stay-at-init" story
+verifiable rather than just plausible: you can read the failure mode straight off
+the JSON.
 
 ## Project layout
 

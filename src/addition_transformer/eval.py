@@ -7,6 +7,7 @@ the model was trained on), and per-digit-position correctness for the heatmap.
 from __future__ import annotations
 
 import numpy as np
+from flax import nnx
 
 from .data import Op, render, sample_pairs_at_digits
 from .model import Transformer
@@ -98,3 +99,28 @@ def per_digit_position_accuracy(
     with np.errstate(invalid="ignore", divide="ignore"):
         accuracy = np.where(support > 0, correct / np.maximum(support, 1), np.nan)
     return accuracy, support
+
+
+def embedding_drift(model: Transformer, seed: int) -> dict[str, np.ndarray]:
+    """Per-row L2 drift of positional embeddings from their initialization.
+
+    A row that received no gradient during training is bit-identical to its
+    initialization, so its drift is exactly 0. This is the direct, falsifiable
+    version of the "positions never seen at training time stay at init" claim:
+    you can read off the JSON which positions actually moved.
+
+    Returns a dict keyed by embedding name (``"pos_emb"`` for learned absolute
+    position, ``"digit_pos_emb"`` for Abacus place-value). Only includes
+    embeddings present in the model's config; RoPE and NoPE return an empty dict.
+    """
+    init_model = Transformer(model.cfg, rngs=nnx.Rngs(seed))
+    out: dict[str, np.ndarray] = {}
+    if model.pos_emb is not None:
+        trained = np.asarray(model.pos_emb.embedding.value)
+        init = np.asarray(init_model.pos_emb.embedding.value)
+        out["pos_emb"] = np.linalg.norm(trained - init, axis=1).astype(np.float32)
+    if model.digit_pos_emb is not None:
+        trained = np.asarray(model.digit_pos_emb.embedding.value)
+        init = np.asarray(init_model.digit_pos_emb.embedding.value)
+        out["digit_pos_emb"] = np.linalg.norm(trained - init, axis=1).astype(np.float32)
+    return out

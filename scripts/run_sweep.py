@@ -29,7 +29,11 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "src"))
 
 from addition_transformer.data import max_len_for
-from addition_transformer.eval import eval_at_digits, per_digit_position_accuracy
+from addition_transformer.eval import (
+    embedding_drift,
+    eval_at_digits,
+    per_digit_position_accuracy,
+)
 from addition_transformer.train import train_model
 
 
@@ -143,6 +147,14 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{prefix}digits={d}: overall={acc*100:.2f}%  "
                   f"per-position={['{:.0%}'.format(x) if x is not None else '-' for x in per_pos[str(d)]]}")
 
+        drift = embedding_drift(model, seed=args.seed)
+        drift_json = {k: v.tolist() for k, v in drift.items()}
+        if drift_json:
+            for k, vals in drift_json.items():
+                zero_positions = [i for i, x in enumerate(vals) if x == 0.0]
+                print(f"{prefix}{k}: {len(zero_positions)} positions never received "
+                      f"gradient (indices {zero_positions})")
+
         results["variants"][v["name"]] = {
             "label": v["label"],
             "pos_encoding": v["pos_encoding"],
@@ -152,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
             "train_time_sec": train_time,
             "accuracies": accs,
             "per_position_accuracy": per_pos,
+            "embedding_drift": drift_json,
         }
 
         args.output.parent.mkdir(parents=True, exist_ok=True)

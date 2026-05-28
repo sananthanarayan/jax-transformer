@@ -124,6 +124,84 @@ def plot_heatmaps(data: dict, output: pathlib.Path) -> None:
     print(f"wrote {output}")
 
 
+def plot_embedding_drift(data: dict, output: pathlib.Path) -> None:
+    """Bar chart of per-position L2 drift from initialization.
+
+    Two stacked panels: top = learned absolute position embeddings (where the
+    Phase 1 baseline fails — positions ≥16 stay at init), bottom = Abacus
+    digit-position embeddings (where the clean abacus variant fails — positions
+    beyond the training-distribution digit count stay at init).
+    """
+    cfg = data["config"]
+    pos_emb_variants: list[tuple[str, list[float]]] = []
+    digit_emb_variants: list[tuple[str, list[float]]] = []
+    for name, v in data["variants"].items():
+        drift = v.get("embedding_drift") or {}
+        if "pos_emb" in drift:
+            pos_emb_variants.append((name, drift["pos_emb"]))
+        if "digit_pos_emb" in drift:
+            digit_emb_variants.append((name, drift["digit_pos_emb"]))
+
+    rows = sum(1 for x in [pos_emb_variants, digit_emb_variants] if x)
+    if rows == 0:
+        return
+
+    fig, axes = plt.subplots(rows, 1, figsize=(8.5, 3.2 * rows), squeeze=False)
+    row_idx = 0
+
+    def _bar_panel(ax, variants, max_x, vline_at, panel_title, xlabel):
+        n = len(variants)
+        width = 0.8 / n
+        positions = np.arange(max_x)
+        for i, (name, drift) in enumerate(variants):
+            drift_padded = drift + [0.0] * (max_x - len(drift))
+            ax.bar(
+                positions + (i - (n - 1) / 2) * width,
+                drift_padded,
+                width=width,
+                color=COLORS.get(name, "tab:gray"),
+                label=data["variants"][name]["label"],
+            )
+        ax.axvline(vline_at + 0.5, color="black", linestyle="--", linewidth=1, alpha=0.6,
+                   label=f"Training-distribution boundary")
+        ax.set_xticks(positions)
+        ax.set_xlabel(xlabel, fontsize=10)
+        ax.set_ylabel("L2 drift from init", fontsize=10)
+        ax.set_title(panel_title, fontsize=11)
+        ax.grid(True, alpha=0.3, axis="y")
+        ax.legend(loc="upper right", fontsize=8)
+
+    if pos_emb_variants:
+        max_x = max(len(d) for _, d in pos_emb_variants)
+        # Longest training-input position is roughly max_len for train_digits.
+        # For 3-digit addition: "999 + 999 = 1998" = 16 chars, so positions 0..15 see grad.
+        train_boundary = 15
+        _bar_panel(
+            axes[row_idx][0], pos_emb_variants, max_x, train_boundary,
+            "Learned absolute position embedding — drift per position",
+            "Position index in input sequence",
+        )
+        row_idx += 1
+
+    if digit_emb_variants:
+        max_x = max(len(d) for _, d in digit_emb_variants)
+        # Position 0 = non-digit; positions 1..train_digits = operand digits;
+        # position train_digits+1 = carry (active for addition). So train_digits+1 is the
+        # rightmost position that sees gradient at clean Abacus.
+        train_digits = cfg.get("train_digits", 3)
+        train_boundary = train_digits + 1
+        _bar_panel(
+            axes[row_idx][0], digit_emb_variants, max_x, train_boundary,
+            "Abacus digit-position embedding — drift per place value",
+            "Digit position (0 = non-digit; 1 = ones place; 2 = tens; ...)",
+        )
+
+    fig.suptitle("Which positional embeddings actually received gradient?", fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(output, dpi=150)
+    print(f"wrote {output}")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser()
     repo_root = pathlib.Path(__file__).parent.parent
@@ -132,12 +210,16 @@ def main(argv: list[str] | None = None) -> None:
                    default=repo_root / "results" / "length_gen.png")
     p.add_argument("--heatmap-output", type=pathlib.Path,
                    default=repo_root / "results" / "per_digit_heatmap.png")
+    p.add_argument("--drift-output", type=pathlib.Path,
+                   default=repo_root / "results" / "embedding_drift.png")
     args = p.parse_args(argv)
 
     data = json.loads(args.input.read_text())
     plot_line_chart(data, args.line_output)
     if any("per_position_accuracy" in v for v in data["variants"].values()):
         plot_heatmaps(data, args.heatmap_output)
+    if any(v.get("embedding_drift") for v in data["variants"].values()):
+        plot_embedding_drift(data, args.drift_output)
 
 
 if __name__ == "__main__":
