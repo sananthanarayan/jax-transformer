@@ -30,8 +30,11 @@ def plot_line_chart(data: dict, output: pathlib.Path) -> None:
     cfg = data["config"]
     train_digits = cfg["train_digits"]
     eval_digits = cfg["eval_digits"]
+    seeds = cfg.get("seeds") or [cfg.get("seed", 0)]
+    n_seeds = len(seeds)
 
     fig, ax = plt.subplots(figsize=(8.0, 4.8))
+    title_extra = f"  ·  {n_seeds} seeds (mean ± 1σ)" if n_seeds > 1 else ""
     ax.axvspan(
         eval_digits[0] - 0.1, train_digits + 0.1,
         alpha=0.08, color="gray", zorder=0,
@@ -41,17 +44,26 @@ def plot_line_chart(data: dict, output: pathlib.Path) -> None:
     for name, v in data["variants"].items():
         xs = [int(d) for d in v["accuracies"].keys()]
         ys = [v["accuracies"][str(d)] * 100 for d in xs]
+        std = [v.get("accuracies_std", {}).get(str(d), 0.0) * 100 for d in xs]
+        color = COLORS.get(name, "tab:gray")
+        if any(s > 0 for s in std):
+            ax.fill_between(
+                xs,
+                [m - s for m, s in zip(ys, std)],
+                [m + s for m, s in zip(ys, std)],
+                color=color, alpha=0.15, linewidth=0,
+            )
         ax.plot(
             xs, ys,
             marker="o", linewidth=2, markersize=7,
-            color=COLORS.get(name, "tab:gray"),
+            color=color,
             label=v["label"],
         )
 
     ax.set_xlabel("Operand digit count", fontsize=11)
     ax.set_ylabel("Exact-match accuracy (%)", fontsize=11)
     ax.set_title(
-        f"Length generalization on {cfg['op']} (trained on ≤{train_digits} digits)",
+        f"Length generalization on {cfg['op']} (trained on ≤{train_digits} digits){title_extra}",
         fontsize=12,
     )
     ax.set_xticks(eval_digits)
@@ -133,14 +145,26 @@ def plot_embedding_drift(data: dict, output: pathlib.Path) -> None:
     beyond the training-distribution digit count stay at init).
     """
     cfg = data["config"]
-    pos_emb_variants: list[tuple[str, list[float]]] = []
-    digit_emb_variants: list[tuple[str, list[float]]] = []
+    pos_emb_variants: list[tuple[str, list[float], list[float]]] = []
+    digit_emb_variants: list[tuple[str, list[float], list[float]]] = []
+
+    def _std_from_per_seed(v: dict, table_name: str) -> list[float]:
+        per_seed = v.get("per_seed") or []
+        if len(per_seed) < 2:
+            return []
+        stacked = [s["embedding_drift"].get(table_name) for s in per_seed]
+        if any(x is None for x in stacked):
+            return []
+        n = len(stacked[0])
+        import statistics as _st
+        return [_st.pstdev([s_row[i] for s_row in stacked]) for i in range(n)]
+
     for name, v in data["variants"].items():
         drift = v.get("embedding_drift") or {}
         if "pos_emb" in drift:
-            pos_emb_variants.append((name, drift["pos_emb"]))
+            pos_emb_variants.append((name, drift["pos_emb"], _std_from_per_seed(v, "pos_emb")))
         if "digit_pos_emb" in drift:
-            digit_emb_variants.append((name, drift["digit_pos_emb"]))
+            digit_emb_variants.append((name, drift["digit_pos_emb"], _std_from_per_seed(v, "digit_pos_emb")))
 
     rows = sum(1 for x in [pos_emb_variants, digit_emb_variants] if x)
     if rows == 0:
@@ -153,17 +177,20 @@ def plot_embedding_drift(data: dict, output: pathlib.Path) -> None:
         n = len(variants)
         width = 0.8 / n
         positions = np.arange(max_x)
-        for i, (name, drift) in enumerate(variants):
+        for i, (name, drift, std) in enumerate(variants):
             drift_padded = drift + [0.0] * (max_x - len(drift))
+            std_padded = (std + [0.0] * (max_x - len(std))) if std else None
             ax.bar(
                 positions + (i - (n - 1) / 2) * width,
                 drift_padded,
                 width=width,
+                yerr=std_padded if std_padded else None,
+                error_kw={"linewidth": 0.8, "ecolor": "#333"} if std_padded else {},
                 color=COLORS.get(name, "tab:gray"),
                 label=data["variants"][name]["label"],
             )
         ax.axvline(vline_at + 0.5, color="black", linestyle="--", linewidth=1, alpha=0.6,
-                   label=f"Training-distribution boundary")
+                   label="Training-distribution boundary")
         ax.set_xticks(positions)
         ax.set_xlabel(xlabel, fontsize=10)
         ax.set_ylabel("L2 drift from init", fontsize=10)
@@ -172,7 +199,7 @@ def plot_embedding_drift(data: dict, output: pathlib.Path) -> None:
         ax.legend(loc="upper right", fontsize=8)
 
     if pos_emb_variants:
-        max_x = max(len(d) for _, d in pos_emb_variants)
+        max_x = max(len(d) for _, d, _ in pos_emb_variants)
         # Longest training-input position is roughly max_len for train_digits.
         # For 3-digit addition: "999 + 999 = 1998" = 16 chars, so positions 0..15 see grad.
         train_boundary = 15
@@ -184,7 +211,7 @@ def plot_embedding_drift(data: dict, output: pathlib.Path) -> None:
         row_idx += 1
 
     if digit_emb_variants:
-        max_x = max(len(d) for _, d in digit_emb_variants)
+        max_x = max(len(d) for _, d, _ in digit_emb_variants)
         # Position 0 = non-digit; positions 1..train_digits = operand digits;
         # position train_digits+1 = carry (active for addition). So train_digits+1 is the
         # rightmost position that sees gradient at clean Abacus.
