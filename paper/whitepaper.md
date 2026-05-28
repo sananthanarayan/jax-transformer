@@ -2,8 +2,11 @@
 
 **A controlled comparison of positional encoding schemes on a 10M-parameter arithmetic transformer.**
 
-*Sanjay Ananthanarayan — Draft v0.2. Numbers in §6 are from the run logged in
-`results/sweep.json`; figures are in `results/`.*
+*Sanjay Ananthanarayan · v0.3 · May 2026
+[github.com/sananthanarayan/jax-transformer](https://github.com/sananthanarayan/jax-transformer)*
+
+Numbers in §6 are from the run logged in `results/sweep.json`; figures are
+in `results/`. The full reproduction pipeline is one command: `make figures`.
 
 ---
 
@@ -13,13 +16,13 @@ I train a 10.6M-parameter decoder-only transformer on 3-digit addition and test 
 
 ## 1. Introduction
 
-Length generalization on arithmetic is a sharp probe for what a transformer learns about position. The task is small enough that controlled experiments fit comfortably on a single GPU in minutes; the rules of the task are unambiguous; and yet the model has to *systematically* extend a pattern to inputs longer than anything it saw. This is the setting in which length-generalization failures of standard transformers were first cleanly demonstrated [@anil2022], and the setting in which several recent proposals (NoPE [@kazemnejad2023], Abacus embeddings [@mcleish2024], scratchpad reasoning [@nye2021]) have been benchmarked.
+Length generalization on arithmetic is a sharp probe for what a transformer learns about position. The task is small enough that controlled experiments fit comfortably on a single GPU in minutes; the rules of the task are unambiguous; and yet the model has to *systematically* extend a pattern to inputs longer than anything it saw. This is the setting in which length-generalization failures of standard transformers were first cleanly demonstrated [Anil et al. 2022](https://arxiv.org/abs/2207.04901), and the setting in which several recent proposals (NoPE [Kazemnejad et al. 2023](https://arxiv.org/abs/2305.19466), Abacus embeddings [McLeish et al. 2024](https://arxiv.org/abs/2405.17399), scratchpad reasoning [Nye et al. 2021](https://arxiv.org/abs/2112.00114)) have been benchmarked.
 
 The setup here is deliberately minimal:
 
 - A 10.6M-parameter decoder-only transformer with pre-norm, GeLU MLPs, RMSNorm, and causal self-attention (no fancy attention variants).
 - A 15-token character-level vocabulary (digits, space, `+`, `*`, `=`, `<pad>`).
-- Synthetic data: `"{a} + {b} = {result}"`, optionally with the answer reversed (`"579"` written as `"975"` so carries flow with the causal direction [@nogueira2021]).
+- Synthetic data: `"{a} + {b} = {result}"`, optionally with the answer reversed (`"579"` written as `"975"` so carries flow with the causal direction [Nogueira et al. 2021](https://arxiv.org/abs/2102.13019)).
 - Training on the full 10⁶ pairs of 3-digit operands, with held-out OOD evaluation at 1, 2, 3, 4, 5, and 6 digits.
 
 The contributions of this report are:
@@ -46,6 +49,23 @@ The code, configuration, and the full reproducibility pipeline (`make figures`) 
 | Total parameters | ~10.66M |
 
 Causal self-attention. The output head is untied from the input embedding. Default `max_len = 32`, set by `max_len_for("addition", 6)` so the model can ingest sequences up to 6-digit-operand addition without architectural changes between in- and out-of-distribution evaluation.
+
+```mermaid
+flowchart TB
+    A["Input tokens<br/>(B, T)"] --> B["Token embedding<br/>(B, T, 384)"]
+    B --> C["Positional injection<br/>(varies by variant — see §3)"]
+    C --> D["6 × Decoder block<br/>(RMSNorm → Causal attention → MLP)"]
+    D --> E["Final RMSNorm"]
+    E --> F["Linear head (untied)<br/>logits (B, T, 15)"]
+```
+
+Positional information enters at one of two sites: (a) **added to token
+embeddings** before the first decoder block (`baseline`, `reversed`, and
+both Abacus variants), or (b) **applied to Q and K** inside each decoder
+block's attention computation (`rope`). The `nope` variant skips both.
+This means RoPE alone is invisible at the embedding stage but appears
+inside every attention layer; the other PE schemes are localized to the
+single addition step shown above.
 
 ### Tokenization
 
@@ -90,24 +110,57 @@ The standard variant from the original transformer: a learned `Embed(max_len, d_
 - `baseline`: natural answer order. The model emits the most significant digit first.
 - `reversed`: the answer is reversed at training time, so the model emits the ones digit first. Carries flow left-to-right, matching the causal direction.
 
-The reversed flavor is the well-known "Nogueira trick" [@nogueira2021] and is included for two reasons. First, it isolates whether the gain from `reversed` over `baseline` comes from answer order (the carry-friendly direction) or from some other interaction. Second, it provides a fair baseline against which to evaluate the other reversed-answer variants (`nope`, `rope`, `abacus`).
+The reversed flavor is the well-known "Nogueira trick" [Nogueira et al. 2021](https://arxiv.org/abs/2102.13019) and is included for two reasons. First, it isolates whether the gain from `reversed` over `baseline` comes from answer order (the carry-friendly direction) or from some other interaction. Second, it provides a fair baseline against which to evaluate the other reversed-answer variants (`nope`, `rope`, `abacus`).
 
 ### 3.2 NoPE
 
-No positional encoding is added at all. The model relies only on the causal-mask asymmetry to break symmetry between positions. Despite this seeming impoverishment, NoPE has been shown [@kazemnejad2023] to extrapolate further than learned absolute PE in several settings, presumably because there is no out-of-distribution position to be confused by.
+No positional encoding is added at all. The model relies only on the causal-mask asymmetry to break symmetry between positions. Despite this seeming impoverishment, NoPE has been shown [Kazemnejad et al. 2023](https://arxiv.org/abs/2305.19466) to extrapolate further than learned absolute PE in several settings, presumably because there is no out-of-distribution position to be confused by.
 
 ### 3.3 RoPE
 
-Rotary position embeddings [@su2021]. I precompute a `(T, d_head/2)` table of cos/sin angles `pos · 10000^(-2k/d_head)` and rotate pairs of feature dimensions of Q and K inside `CausalSelfAttention` before computing attention scores. V is not rotated. This formulation expresses position information through *relative* offsets in the attention dot product, which in principle generalizes to unseen absolute positions as long as the relative offsets stay in distribution.
+Rotary position embeddings [Su et al. 2021](https://arxiv.org/abs/2104.09864). I precompute a `(T, d_head/2)` table of cos/sin angles `pos · 10000^(-2k/d_head)` and rotate pairs of feature dimensions of Q and K inside `CausalSelfAttention` before computing attention scores. V is not rotated. This formulation expresses position information through *relative* offsets in the attention dot product, which in principle generalizes to unseen absolute positions as long as the relative offsets stay in distribution.
 
 ### 3.4 Abacus place-value embeddings
 
-Following McLeish et al. [@mcleish2024], absolute position information is dropped entirely and replaced with an embedding of *each digit token's place value*. The procedure:
+Following [McLeish et al. 2024](https://arxiv.org/abs/2405.17399), absolute position information is dropped entirely and replaced with an embedding of *each digit token's place value*. The procedure:
 
 1. Identify each contiguous run of digit tokens in the input.
 2. For the first two runs (operands, MSB-first by convention), assign position `run_length − index` so the ones digit gets position 1, tens get 2, hundreds get 3, etc.
 3. For the third run (the answer, LSB-first under reversed answers), assign position `index + 1` directly — the leftmost digit of the reversed string is the ones digit.
 4. Non-digit tokens (including pad, space, `+`, `=`) receive position 0, a distinct "no-position" embedding.
+
+The full algorithm in code (from `src/addition_transformer/data.py`):
+
+```python
+def compute_digit_positions(input_ids, *, reverse_answer):
+    """Per-token place-value index. 0 = non-digit; 1+ = distance from ones place."""
+    is_digit = (input_ids >= 1) & (input_ids <= 10)   # vocab IDs 1..10 are '0'..'9'
+    positions = np.zeros_like(input_ids, dtype=np.int32)
+
+    # Find each contiguous run of digit tokens.
+    runs, in_run, start = [], False, 0
+    for i, d in enumerate(is_digit):
+        if d and not in_run:
+            start, in_run = i, True
+        elif not d and in_run:
+            runs.append((start, i))
+            in_run = False
+    if in_run:
+        runs.append((start, len(is_digit)))
+
+    # Operands (first two runs) are MSB-first; the answer (third run) is LSB-first
+    # under reversed answers. Both schemes count the same place value (ones=1, tens=2,
+    # ...), they just read it off different ends of the run.
+    for run_idx, (s, e) in enumerate(runs):
+        run_len = e - s
+        is_answer = run_idx == 2
+        for j in range(run_len):
+            if is_answer and reverse_answer:
+                positions[s + j] = j + 1           # LSB-first
+            else:
+                positions[s + j] = run_len - j     # MSB-first
+    return positions
+```
 
 A `(max_digit_pos + 1, d_model)` learned table is added at every position in the input. With `max_digit_pos = 16` (capping at 16-digit place values), the additional parameter count is negligible relative to the 10.6M total.
 
@@ -357,13 +410,52 @@ compute budget. Specifically:
 
 ## 9. Related work
 
-**Arithmetic transformers and length generalization.** Lee et al. [@lee2023] systematically studied small transformers on arithmetic and identified the answer-order trick (predict ones-first) as critical for in-distribution accuracy. Nye et al. [@nye2021] introduced scratchpad reasoning, where the model generates intermediate carry computations explicitly; this trades inference cost for accuracy. Anil et al. [@anil2022] demonstrated that length generalization is qualitatively hard for vanilla transformers even when in-distribution accuracy is perfect.
+**Positional encodings as the proximate cause of failure.**
+[Vaswani et al. 2017](https://arxiv.org/abs/1706.03762) introduced sinusoidal
+absolute position embeddings, later commonly replaced by learned absolute PE
+for simplicity.
+[Su et al. 2021](https://arxiv.org/abs/2104.09864) introduced rotary position
+embeddings (RoPE), expressing position through rotations of Q and K and
+claiming better extrapolation properties.
+[Press et al. 2022](https://arxiv.org/abs/2108.12409) introduced ALiBi, a
+static linear bias on attention scores — not evaluated here, but a natural
+fifth point of comparison.
+[Kazemnejad et al. 2023](https://arxiv.org/abs/2305.19466) argued that for
+decoder-only models, **no positional encoding at all** can extrapolate
+further than learned absolute PE, attributing this to the implicit position
+information carried by causal masking. The results in §6 do not reproduce
+this advantage at 10M-parameter scale and the compute budget here; whether
+the gap closes at larger scale or with more training is left to future work.
 
-**Positional encodings.** Vaswani et al. [@vaswani2017] introduced sinusoidal absolute PE; subsequent practice often replaced it with learned absolute PE for simplicity. Su et al. [@su2021] introduced rotary position embeddings (RoPE) that express position information as rotations in the attention dot product, with reportedly better extrapolation properties. Press et al. [@press2022] introduced ALiBi, which adds a static linear bias to attention scores based on position differences. Kazemnejad et al. [@kazemnejad2023] argued that, for decoder-only architectures, **no positional encoding at all** can extrapolate further than learned absolute PE, attributing this to the implicit position information carried by causal masking.
+**Arithmetic-specific interventions.**
+[Nogueira et al. 2021](https://arxiv.org/abs/2102.13019) observed that
+reversing the answer (predict ones digit first) makes carries flow with the
+causal direction, the trick used in every reversed-answer variant here.
+[Nye et al. 2021](https://arxiv.org/abs/2112.00114) introduced scratchpad
+reasoning, where the model emits intermediate carry computations; this trades
+inference compute for accuracy.
+[Lee et al. 2023](https://arxiv.org/abs/2307.03381) systematically studied
+small transformers on arithmetic and identified the reversed-answer trick as
+critical for in-distribution accuracy at 3+ digits.
+[McLeish et al. 2024](https://arxiv.org/abs/2405.17399) introduced Abacus
+embeddings — a learned table indexed by a digit's distance from the ones
+place — and reported strong length-generalization gains. The clean-Abacus /
+Abacus-curriculum comparison in this report is designed to disentangle the
+parameterization from the data-coverage component of that result; §6 shows
+that the parameterization alone does not suffice.
 
-**Place-value embeddings.** McLeish et al. [@mcleish2024] introduced "Abacus" embeddings — a learned table indexed by a digit's distance from the ones place — and reported strong length-generalization gains for arithmetic. The clean-Abacus / Abacus-curriculum comparison in this report is designed to disentangle the parameterization from the data coverage in that result.
-
-**Grokking and emergent arithmetic.** Power et al. [@power2022] showed that small transformers trained on modular arithmetic exhibit *grokking*: long after the training loss saturates, the model abruptly generalizes. Although this study uses non-modular addition and does not focus on grokking, the underlying optimization dynamics are relevant.
+**Length generalization broadly.**
+[Anil et al. 2022](https://arxiv.org/abs/2207.04901) demonstrated that length
+generalization is qualitatively hard for vanilla transformers even with
+perfect in-distribution accuracy. The drift-cliff finding in §6.3 gives one
+mechanistic answer: at the transition out of distribution, embedding rows
+have not received any gradient signal and therefore cannot encode
+position-conditional information.
+[Power et al. 2022](https://arxiv.org/abs/2201.02177) showed that small
+transformers on modular arithmetic exhibit *grokking* — abrupt generalization
+long after training loss saturates. This study uses non-modular addition and
+does not focus on grokking, but the underlying optimization dynamics are
+related.
 
 ## 10. Conclusion
 
@@ -397,13 +489,31 @@ artifact rather than a fundamental ceiling.
 
 ## References
 
-- [@anil2022] Anil, C. et al. (2022). *Exploring length generalization in large language models.* NeurIPS.
-- [@kazemnejad2023] Kazemnejad, A. et al. (2023). *The Impact of Positional Encoding on Length Generalization in Transformers.* NeurIPS. arXiv:2305.19466.
-- [@lee2023] Lee, N. et al. (2023). *Teaching Arithmetic to Small Transformers.* arXiv:2307.03381.
-- [@mcleish2024] McLeish, S. et al. (2024). *Transformers Can Do Arithmetic with the Right Embeddings.* NeurIPS. arXiv:2405.17399.
-- [@nogueira2021] Nogueira, R., Jiang, Z., Lin, J. (2021). *Investigating the Limitations of Transformers with Simple Arithmetic Tasks.* arXiv:2102.13019.
-- [@nye2021] Nye, M. et al. (2021). *Show Your Work: Scratchpads for Intermediate Computation with Language Models.* arXiv:2112.00114.
-- [@power2022] Power, A. et al. (2022). *Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets.* arXiv:2201.02177.
-- [@press2022] Press, O., Smith, N., Lewis, M. (2022). *Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation.* ICLR. arXiv:2108.12409.
-- [@su2021] Su, J. et al. (2021). *RoFormer: Enhanced Transformer with Rotary Position Embedding.* arXiv:2104.09864.
-- [@vaswani2017] Vaswani, A. et al. (2017). *Attention Is All You Need.* NeurIPS.
+1. Anil, C. et al. (2022). *Exploring length generalization in large language
+   models.* NeurIPS.
+   [arXiv:2207.04901](https://arxiv.org/abs/2207.04901)
+2. Kazemnejad, A. et al. (2023). *The Impact of Positional Encoding on Length
+   Generalization in Transformers.* NeurIPS.
+   [arXiv:2305.19466](https://arxiv.org/abs/2305.19466)
+3. Lee, N. et al. (2023). *Teaching Arithmetic to Small Transformers.*
+   [arXiv:2307.03381](https://arxiv.org/abs/2307.03381)
+4. McLeish, S. et al. (2024). *Transformers Can Do Arithmetic with the Right
+   Embeddings.* NeurIPS.
+   [arXiv:2405.17399](https://arxiv.org/abs/2405.17399)
+5. Nogueira, R., Jiang, Z., Lin, J. (2021). *Investigating the Limitations of
+   Transformers with Simple Arithmetic Tasks.*
+   [arXiv:2102.13019](https://arxiv.org/abs/2102.13019)
+6. Nye, M. et al. (2021). *Show Your Work: Scratchpads for Intermediate
+   Computation with Language Models.*
+   [arXiv:2112.00114](https://arxiv.org/abs/2112.00114)
+7. Power, A. et al. (2022). *Grokking: Generalization Beyond Overfitting on
+   Small Algorithmic Datasets.*
+   [arXiv:2201.02177](https://arxiv.org/abs/2201.02177)
+8. Press, O., Smith, N., Lewis, M. (2022). *Train Short, Test Long: Attention
+   with Linear Biases Enables Input Length Extrapolation.* ICLR.
+   [arXiv:2108.12409](https://arxiv.org/abs/2108.12409)
+9. Su, J. et al. (2021). *RoFormer: Enhanced Transformer with Rotary Position
+   Embedding.*
+   [arXiv:2104.09864](https://arxiv.org/abs/2104.09864)
+10. Vaswani, A. et al. (2017). *Attention Is All You Need.* NeurIPS.
+    [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)

@@ -2,7 +2,7 @@ PYTHON ?= python
 SWEEP_JSON := results/sweep.json
 FIGURE := results/length_gen.png
 
-.PHONY: help install smoke test train sweep sweep-phase1 quick plot figures clean
+.PHONY: help install smoke test train sweep sweep-phase1 quick plot figures paper clean
 
 help:
 	@echo "Targets:"
@@ -15,6 +15,7 @@ help:
 	@echo "  quick        Run a fast sanity sweep (2 epochs, fewer eval samples)"
 	@echo "  plot         Rebuild figures from results/sweep.json"
 	@echo "  figures      sweep + plot (the headline command)"
+	@echo "  paper        Render paper/whitepaper.md -> paper/whitepaper.html (needs pandoc)"
 	@echo "  clean        Delete results/*.json and results/*.png"
 
 install:
@@ -45,6 +46,15 @@ plot: $(SWEEP_JSON)
 
 figures: sweep plot
 	@echo "Wrote $(FIGURE)"
+
+paper:
+	pandoc paper/whitepaper.md \
+	  --standalone \
+	  --metadata title="Length generalization in small arithmetic transformers" \
+	  --css=whitepaper.css \
+	  --include-in-header=paper/header.html \
+	  -o paper/whitepaper.html
+	@echo "Wrote paper/whitepaper.html (open in browser; print-to-PDF if desired)"
 
 clean:
 	rm -f results/*.json results/*.png

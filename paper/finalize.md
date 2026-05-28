@@ -5,10 +5,17 @@ you would be comfortable sending to a recruiter, posting on a personal site, or
 submitting to arXiv. Items are grouped by whether they block public sharing or
 are polish.
 
-**Status as of v0.2:** items #1, #2, #3, #5 are done (sweep ran, real numbers
-in §6, predictions reconciled with reality in §7, figures embedded, voice
-changed to first person). The remaining must-have is #4 (author block + abstract
-polish, partially done). Everything else is polish or production.
+**Status as of v0.3:** items #1, #2, #3, #4, #5, #6, #7, #8, #10, #11, #12 are
+done. The whitepaper has real sweep numbers, embedded figures, first-person
+voice, an architecture diagram (mermaid block, renders on GitHub), a Python
+code listing for the Abacus digit-position algorithm, hyperlinked arXiv
+citations inline + a numbered References section, a Pandoc-rendered HTML
+artifact at `paper/whitepaper.html` (browser-printable to PDF), and a
+README pointer to the paper.
+
+The only outstanding item is **#9 (multi-seed runs)** — requires ~3.5 hours
+of additional CPU time for 3 seeds. Skipping unless you want to commit the
+compute.
 
 ## Must-have (blocks public sharing)
 

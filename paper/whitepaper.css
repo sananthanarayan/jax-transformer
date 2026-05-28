@@ -1,0 +1,119 @@
+/* Minimal academic styling for the whitepaper HTML render. */
+
+body {
+    max-width: 780px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 16px;
+    line-height: 1.55;
+    color: #1d1d1f;
+}
+
+h1 {
+    font-size: 1.7em;
+    border-bottom: 2px solid #1d1d1f;
+    padding-bottom: 0.2em;
+    line-height: 1.25;
+}
+
+h2 {
+    margin-top: 2em;
+    font-size: 1.25em;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.15em;
+}
+
+h3 {
+    margin-top: 1.5em;
+    font-size: 1.05em;
+}
+
+code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+}
+
+pre {
+    background: #f6f8fa;
+    border-radius: 4px;
+    padding: 0.8em 1em;
+    overflow-x: auto;
+}
+
+p code {
+    background: #f6f8fa;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 0.92em;
+}
+
+th, td {
+    border-bottom: 1px solid #ddd;
+    padding: 0.4em 0.8em;
+    text-align: left;
+}
+
+th {
+    border-bottom: 2px solid #1d1d1f;
+}
+
+img {
+    max-width: 100%;
+    margin: 1em 0;
+    border: 1px solid #eee;
+}
+
+figure {
+    margin: 1.5em 0;
+}
+
+blockquote {
+    border-left: 3px solid #ddd;
+    margin-left: 0;
+    padding-left: 1em;
+    color: #555;
+}
+
+em {
+    font-style: italic;
+}
+
+strong {
+    font-weight: 600;
+}
+
+a {
+    color: #0050b3;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 2em 0;
+}
+
+@media print {
+    body {
+        max-width: none;
+        margin: 0;
+        font-size: 11pt;
+    }
+    h1, h2, h3 {
+        page-break-after: avoid;
+    }
+    img {
+        max-width: 100%;
+        page-break-inside: avoid;
+    }
+}

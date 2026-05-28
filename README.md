@@ -4,9 +4,14 @@
 
 A ~10M-parameter decoder-only transformer in [JAX](https://github.com/google/jax) +
 [Flax NNX](https://flax.readthedocs.io/en/latest/nnx_basics.html) that learns to add
-(and then multiply) up-to-3-digit numbers from scratch — and a length-generalization
-experiment showing why learned positional embeddings fall off a cliff outside the
-training distribution.
+(and then multiply) up-to-3-digit numbers from scratch — and a controlled
+six-variant length-generalization sweep showing exactly which positional
+encodings fail when you push past the training distribution, and why.
+
+**Read the writeup first**: [`paper/whitepaper.md`](paper/whitepaper.md). It
+includes the headline chart, the per-digit-position heatmap, and the
+embedding-drift diagnostic that turns the abstract "positions stay at random
+init" story into a 100–300× separation you can read off the trained weights.
 
 The whole thing is small enough to train in a few minutes on a single 14 GB GPU
 (e.g. Colab T4 / L4) and is meant as a clean, hackable starting point for
