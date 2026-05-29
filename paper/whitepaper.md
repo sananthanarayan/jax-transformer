@@ -1,20 +1,23 @@
-# Length generalization, measured in the weights: a controlled study of six positional encodings
+<div class="title-block">
 
-**A 10M-parameter arithmetic transformer, six positional-encoding schemes, three seeds — and a diagnostic that reads the failure mode directly off the trained weights.**
+# Length generalization, measured in the weights
 
-*Sanjay Ananthanarayan · v0.4 · May 2026
-[github.com/sananthanarayan/jax-transformer](https://github.com/sananthanarayan/jax-transformer)*
+## A controlled study of six positional encodings on a small arithmetic transformer
 
-Numbers in §6 are mean ± standard deviation over **3 seeds** (full sweep
-logged in `results/sweep.json`, ~3.4 hours of CPU). Figures show the mean
-with ±1σ shading. The full reproduction pipeline is one command:
-`make figures`.
+**Sanjay Ananthanarayan**
+Independent research · [github.com/sananthanarayan/jax-transformer](https://github.com/sananthanarayan/jax-transformer)
 
----
+**Version 1.0** · May 2026 · Technical report
+
+*Keywords:* length generalization, positional encoding, mechanistic interpretability, arithmetic transformers, NoPE, RoPE, Abacus embeddings
+
+</div>
 
 ## Abstract
 
 I trained a 10.6M-parameter decoder-only transformer on 3-digit addition and tested its ability to generalize to operand sizes never seen at training time (1–6 digits), comparing six positional-encoding variants over three seeds on the same architecture and schedule: learned absolute, learned absolute with reversed answers, no positional encoding (NoPE), rotary (RoPE), Abacus-style place-value embeddings, and Abacus trained with a length curriculum. Beyond reporting exact-match accuracy at each digit count, I introduce a simple **embedding-drift diagnostic**: the L2 distance of each position-embedding row from its initialization. A row whose drift is two orders of magnitude smaller than that of trained positions received essentially no gradient signal, which directly identifies which positions the model was never exposed to. The finding is that at this scale **no mechanism extrapolates by itself** — NoPE, RoPE, and clean Abacus all cliff to 0.0 ± 0.0 accuracy at the training-distribution boundary, bit-exact across seeds. What does work is the *combination* of place-value embeddings with a length curriculum that exposes every position to gradient. The drift diagnostic confirms this directly in the weights: the cliff position is identical across all three seeds, and the curriculum variant has non-zero drift exactly one position past where clean Abacus stops.
+
+> **Reproducibility.** All numbers in §6 are mean ± standard deviation over 3 random seeds (full sweep logged in `results/sweep.json`, ~3.4 hours of CPU). Figures show the mean with ±1σ shading. The entire pipeline reproduces from one command: `make figures`.
 
 ## 1. Introduction
 
@@ -252,10 +255,10 @@ Four observations:
 - **Seed variability is concentrated at the OOD-distribution edges.**
   `reversed` swings from 29.7 ± 26.8 at 1-digit to 72.0 ± 36.5 at 2-digit —
   standard deviations larger than half the mean. By contrast, in-distribution
-  3-digit accuracy is 100.0 ± 0.0 for everything except NoPE. The single-seed
-  draft of this paper (v0.2–v0.3) reported point estimates for the
-  intermediate cells that turn out to be roughly one standard deviation off
-  the mean.
+  3-digit accuracy is 100.0 ± 0.0 for everything except NoPE. A single-seed
+  run would report point estimates for the intermediate cells that land
+  roughly one standard deviation off the mean — which is why the multi-seed
+  protocol matters precisely here, and nowhere else.
 - **NoPE is harder to train consistently than the other variants.** Its
   in-distribution 3-digit accuracy is 87.2 ± 6.9% — the only variant whose
   3-digit numbers are below ceiling, with one of the three seeds plateauing

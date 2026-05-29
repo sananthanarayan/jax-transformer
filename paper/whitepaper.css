@@ -17,6 +17,51 @@ h1 {
     line-height: 1.25;
 }
 
+/* Title block (front matter). The H1/H2 inside it are the paper title and
+   subtitle; suppress their default heading chrome so they read as a unit. */
+.title-block {
+    text-align: center;
+    margin: 1.5em 0 2.5em;
+    padding-bottom: 1.5em;
+    border-bottom: 3px double #1d1d1f;
+}
+
+.title-block h1 {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0.3em;
+    font-size: 1.9em;
+}
+
+.title-block h2 {
+    border-bottom: none;
+    margin-top: 0;
+    font-size: 1.15em;
+    font-weight: 400;
+    font-style: italic;
+    color: #444;
+}
+
+.title-block p {
+    margin: 0.5em 0;
+}
+
+.title-block em {
+    color: #555;
+    font-size: 0.9em;
+}
+
+/* Abstract callout (the reproducibility note rendered as a blockquote right
+   after the abstract). */
+blockquote {
+    background: #f6f8fa;
+    border-left: 3px solid #999;
+    padding: 0.6em 1em;
+    margin: 1.2em 0;
+    font-size: 0.95em;
+    color: #333;
+}
+
 h2 {
     margin-top: 2em;
     font-size: 1.25em;
@@ -71,13 +116,6 @@ img {
 
 figure {
     margin: 1.5em 0;
-}
-
-blockquote {
-    border-left: 3px solid #ddd;
-    margin-left: 0;
-    padding-left: 1em;
-    color: #555;
 }
 
 em {

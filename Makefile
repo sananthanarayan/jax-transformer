@@ -69,7 +69,7 @@ paper: paper-html
 	  --user-data-dir="$$TMPDIR_CHROME" \
 	  --virtual-time-budget=15000 \
 	  --run-all-compositor-stages-before-draw \
-	  --print-to-pdf-no-header \
+	  --no-pdf-header-footer \
 	  --print-to-pdf="$$PWD/paper/whitepaper.pdf" \
 	  "file://$$PWD/paper/whitepaper.html" 2>&1 | tail -1 && \
 	rm -rf "$$TMPDIR_CHROME"
