@@ -5,17 +5,19 @@ you would be comfortable sending to a recruiter, posting on a personal site, or
 submitting to arXiv. Items are grouped by whether they block public sharing or
 are polish.
 
-**Status as of v0.3:** items #1, #2, #3, #4, #5, #6, #7, #8, #10, #11, #12 are
-done. The whitepaper has real sweep numbers, embedded figures, first-person
-voice, an architecture diagram (mermaid block, renders on GitHub), a Python
-code listing for the Abacus digit-position algorithm, hyperlinked arXiv
-citations inline + a numbered References section, a Pandoc-rendered HTML
-artifact at `paper/whitepaper.html` (browser-printable to PDF), and a
-README pointer to the paper.
+**Status as of v0.4:** all items #1–#12 are done. The whitepaper has multi-seed
+results (3 seeds, mean ± std) with error bars in the figures, first-person
+voice, an architecture diagram, a code listing, hyperlinked citations, a
+Pandoc HTML artifact, and a README pointer. Two new findings from the
+multi-seed run were folded into the writeup: (a) the 3→4 cliff and the
+drift boundary are *bit-exact* across seeds (the strongest reproducibility
+result in the paper), and (b) NoPE has a previously-unstated convergence
+instability — one of three seeds didn't fully train at this compute budget.
 
-The only outstanding item is **#9 (multi-seed runs)** — requires ~3.5 hours
-of additional CPU time for 3 seeds. Skipping unless you want to commit the
-compute.
+Optional future work beyond this checklist: 5–10 seed runs to tighten
+variance estimates (the 1-in-3 NoPE failure rate is only loosely bounded),
+multiplication runs, and full-compute (8 epochs × 950K grid) runs to test
+whether NoPE/RoPE extrapolation improves with more training.
 
 ## Must-have (blocks public sharing)
 

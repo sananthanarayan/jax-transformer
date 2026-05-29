@@ -2,17 +2,19 @@
 
 **A controlled comparison of positional encoding schemes on a 10M-parameter arithmetic transformer.**
 
-*Sanjay Ananthanarayan · v0.3 · May 2026
+*Sanjay Ananthanarayan · v0.4 · May 2026
 [github.com/sananthanarayan/jax-transformer](https://github.com/sananthanarayan/jax-transformer)*
 
-Numbers in §6 are from the run logged in `results/sweep.json`; figures are
-in `results/`. The full reproduction pipeline is one command: `make figures`.
+Numbers in §6 are mean ± standard deviation over **3 seeds** (full sweep
+logged in `results/sweep.json`, ~3.4 hours of CPU). Figures show the mean
+with ±1σ shading. The full reproduction pipeline is one command:
+`make figures`.
 
 ---
 
 ## Abstract
 
-I train a 10.6M-parameter decoder-only transformer on 3-digit addition and test its ability to generalize to operand sizes never seen at training time (1–6 digits). Six positional-encoding variants are compared on the same architecture and schedule: learned absolute, learned absolute with reversed answers, no positional encoding (NoPE), rotary (RoPE), Abacus-style place-value embeddings, and Abacus trained with a length curriculum. Beyond reporting exact-match accuracy at each digit count, I introduce a simple **embedding-drift diagnostic**: the L2 distance of each position-embedding row from its initialization. A row whose drift is two orders of magnitude smaller than that of trained positions received essentially no gradient signal, which directly identifies which positions the model was never exposed to. The finding is that at this scale **no mechanism extrapolates by itself** — NoPE, RoPE, and clean Abacus all cliff at the training-distribution boundary just as hard as learned absolute PE. What does work is the *combination* of place-value embeddings with a length curriculum that exposes every position to gradient. The drift diagnostic shows this directly in the weights: the curriculum variant has non-zero drift exactly one position past where clean Abacus stops.
+I train a 10.6M-parameter decoder-only transformer on 3-digit addition and test its ability to generalize to operand sizes never seen at training time (1–6 digits), comparing six positional-encoding variants over three seeds on the same architecture and schedule: learned absolute, learned absolute with reversed answers, no positional encoding (NoPE), rotary (RoPE), Abacus-style place-value embeddings, and Abacus trained with a length curriculum. Beyond reporting exact-match accuracy at each digit count, I introduce a simple **embedding-drift diagnostic**: the L2 distance of each position-embedding row from its initialization. A row whose drift is two orders of magnitude smaller than that of trained positions received essentially no gradient signal, which directly identifies which positions the model was never exposed to. The finding is that at this scale **no mechanism extrapolates by itself** — NoPE, RoPE, and clean Abacus all cliff to 0.0 ± 0.0 accuracy at the training-distribution boundary, bit-exact across seeds. What does work is the *combination* of place-value embeddings with a length curriculum that exposes every position to gradient. The drift diagnostic confirms this directly in the weights: the cliff position is identical across all three seeds, and the curriculum variant has non-zero drift exactly one position past where clean Abacus stops.
 
 ## 1. Introduction
 
@@ -213,44 +215,53 @@ All artifacts are reproducible from a single command (`make figures`) on a GPU b
 
 ## 6. Results
 
-The sweep ran on a single CPU for 4330 seconds (~72 min) with 4 epochs per
-variant on a 100K-sample subset of the 3-digit grid (50K mixed-digit samples
-for the curriculum variant). Lower compute than the full 8-epoch / 950K-pair
-spec; the relative ordering of variants and the qualitative findings should
-generalize but absolute numbers would shift upward with more training.
+The sweep ran on a single CPU for 12235 seconds (~3.4 hours) with 4 epochs
+per variant per seed on a 100K-sample subset of the 3-digit grid (50K
+mixed-digit samples for the curriculum variant). Three random seeds; numbers
+below are mean ± standard deviation across seeds. Lower compute than the
+full 8-epoch / 950K-pair spec; the relative ordering of variants and the
+qualitative findings should generalize, but absolute numbers would shift
+upward with more training.
 
 ### 6.1 Exact-match accuracy
 
-![Length-generalization curves across all six variants. The shaded region is
-the training distribution.](../results/length_gen.png)
+![Length-generalization curves across all six variants. Shaded bands are
+±1σ over 3 seeds. The gray vertical region marks the training
+distribution.](../results/length_gen.png)
 
 | Variant | 1d | 2d | 3d | 4d | 5d | 6d |
 |---|---:|---:|---:|---:|---:|---:|
-| `baseline` | 12.0 | 50.0 | 100.0 | 0.0 | 0.0 | 0.0 |
-| `reversed` | 9.5 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 |
-| `nope` | 17.0 | 56.0 | 93.5 | 0.0 | 0.0 | 0.0 |
-| `rope` | 60.0 | 99.0 | 100.0 | 0.0 | 0.0 | 0.0 |
-| `abacus` | 74.0 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 |
+| `baseline` | 15.3 ± 5.8 | 55.3 ± 15.6 | 100.0 | 0.0 | 0.0 | 0.0 |
+| `reversed` | 29.7 ± 26.8 | 72.0 ± 36.5 | 100.0 | 0.0 | 0.0 | 0.0 |
+| `nope` | 7.3 ± 6.9 | 41.3 ± 14.6 | 87.2 ± 6.9 | 0.0 | 0.0 | 0.0 |
+| `rope` | 45.3 ± 10.6 | 98.0 ± 1.4 | 100.0 | 0.0 | 0.0 | 0.0 |
+| `abacus` | 76.7 ± 17.2 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 |
 | `abacus_curriculum` | **100.0** | **100.0** | **100.0** | **100.0** | **100.0** | 0.0 |
 
-Three observations:
+Four observations:
 
-- **Every non-curriculum variant cliffs from 100% to 0% between 3 and 4 digits.**
-  This is the canonical length-generalization failure, and it holds for NoPE
-  and RoPE as well as for learned absolute PE, contradicting one of the
-  more optimistic predictions in §6 of the draft. At ~10M scale, with this
-  compute budget, the mechanism-only interventions buy nothing in extrapolation.
-- **`abacus_curriculum` is the only variant that generalizes past the training
-  distribution.** 100% accuracy holds out to 5 digits (the training maximum)
-  and only collapses at 6, where the millions-place embedding is still at
-  initialization. This is exactly the McLeish et al. result, reproduced here
-  in a controlled comparison.
-- **At 1 digit, every non-curriculum variant is below 75%.** The training
-  distribution is uniform over [0, 1000), so single-digit operands are only
-  ~1% of training pairs; the model effectively never sees `5 + 7 = ` and treats
-  it as out-of-distribution. The curriculum variant explicitly samples single
-  digits and hits 100%. This is a setup artifact, not a generalization claim,
-  and is flagged in §8.
+- **The 3→4 digit cliff is the most robust finding in the sweep.** Every
+  non-curriculum variant hits exactly 0.0% at 4, 5, and 6 digits across all
+  three seeds — zero variance, zero exceptions. This is *not* a "near-zero
+  with noise" finding; it is mechanistically 0. The drift figure (§6.3)
+  shows why.
+- **`abacus_curriculum` is the only variant that generalizes.** 100.0 ± 0.0
+  out to 5 digits (the training maximum), then 0.0 at 6. The curriculum
+  trains every place-value embedding it can reach; the one position past it
+  fails completely.
+- **Seed variability is concentrated at the OOD-distribution edges.**
+  `reversed` swings from 29.7 ± 26.8 at 1-digit to 72.0 ± 36.5 at 2-digit —
+  standard deviations larger than half the mean. By contrast, in-distribution
+  3-digit accuracy is 100.0 ± 0.0 for everything except NoPE. The single-seed
+  draft of this paper (v0.2–v0.3) reported point estimates for the
+  intermediate cells that turn out to be roughly one standard deviation off
+  the mean.
+- **NoPE is harder to train consistently than the other variants.** Its
+  in-distribution 3-digit accuracy is 87.2 ± 6.9% — the only variant whose
+  3-digit numbers are below ceiling, with one of the three seeds plateauing
+  at 77.5%. This is a previously-unstated finding from the multi-seed run:
+  NoPE not only fails to extrapolate, it is *also* an outlier in training
+  stability at this scale and compute budget.
 
 ### 6.2 Per-digit-position pattern
 
@@ -283,36 +294,45 @@ maximum.
 
 ### 6.3 Embedding drift
 
-![Per-row L2 distance from initialization, separated into learned absolute PE
-(top) and Abacus digit-position embedding (bottom). The brick wall at the
-training-distribution boundary in each panel is the failure mode the paper
-is about.](../results/embedding_drift.png)
+![Per-row L2 distance from initialization, averaged over 3 seeds with ±1σ
+error bars. Top panel: learned absolute PE. Bottom panel: Abacus
+digit-position embedding. The brick wall at the training-distribution
+boundary in each panel is the failure mode the paper is about, and it
+holds across seeds with very small bars.](../results/embedding_drift.png)
 
-The raw numbers, with the threshold between "received gradient" and
-"essentially untouched" boxed in italics:
+Mean drift values across the three seeds:
 
-- **`baseline.pos_emb`**: positions 0–15 drift in *[0.05, 0.24]*; positions
-  16–25 drift in *[0.001, 0.0013]*. A ~200× drop at the boundary.
-- **`reversed.pos_emb`**: positions 0–15 drift in *[0.05, 0.21]*; positions
-  16–25 drift in *[0.001, 0.0013]*. Same pattern.
-- **`abacus.digit_pos_emb`**: positions 0–4 drift in *[0.03, 0.39]*; positions
-  5–16 drift in *[0.001, 0.0013]*. Note that position 4 — the *carry into
-  thousands*, which appears when summing two 3-digit numbers — has the
-  highest drift (0.388), confirming that even in 3-digit-only training this
-  place value is exercised by the loss.
-- **`abacus_curriculum.digit_pos_emb`**: positions 0–6 drift in *[0.03, 0.23]*;
-  positions 7–16 drift in *[0.001, 0.0013]*. Position 6 — the carry from
-  5-digit additions — has the highest drift (0.228), again matching the
-  carry-out-of-training-range expectation.
+- **`baseline.pos_emb`**: positions 0–15 drift in [0.05, 0.30]; positions
+  16–25 drift in [0.001, 0.0013]. A ~200–250× drop at the boundary, and
+  the boundary itself is identical across all three seeds (positions 16+
+  are below the 0.005 threshold for every seed).
+- **`reversed.pos_emb`**: positions 0–15 drift in [0.05, 0.21]; positions
+  16–25 below 0.005. Same boundary.
+- **`abacus.digit_pos_emb`**: positions 0–4 drift in [0.03, 0.37]; positions
+  5–16 below 0.005. Position 4 — the *carry into thousands*, which appears
+  when summing two 3-digit numbers — has the highest drift (mean 0.37, std
+  ~0.05), confirming that even in 3-digit-only training this place value
+  is exercised by the loss.
+- **`abacus_curriculum.digit_pos_emb`**: positions 0–6 drift in [0.03, 0.22];
+  positions 7–16 below 0.005. Position 6 — the carry from 5-digit additions
+  — has the highest drift, again matching the carry-out-of-training-range
+  expectation.
 
-The ~0.001 floor at untouched positions is uniform and corresponds to the
-multiplicative shrink from AdamW weight decay over the training run (~740
-steps × 3×10⁻⁴ LR × 0.01 weight_decay ≈ 2×10⁻³ relative drift, matching the
-observed value). It is *not* gradient signal; it is a known artifact of weight
-decay applying to every parameter regardless of gradient. The diagnostic could
-be sharpened by using cosine drift instead of L2 (cosine is invariant to
-multiplicative rescaling), but at a 100–300× separation the L2 metric is
-already unambiguous in identifying which positions are functionally untouched.
+**The drift cliff is bit-exact across seeds.** Across all three random
+initializations and all four embedding tables shown above, the boundary
+between "received gradient" and "essentially untouched" lands at the same
+index every time. This is the strongest reproducibility result in the
+paper.
+
+The ~0.001 floor at untouched positions corresponds to the multiplicative
+shrink from AdamW weight decay over the training run (~740 steps × 3×10⁻⁴
+LR × 0.01 weight_decay ≈ 2×10⁻³ relative drift, matching the observed
+value). It is *not* gradient signal; it is a known artifact of weight
+decay applying to every parameter regardless of gradient. The diagnostic
+could be sharpened by using cosine drift instead of L2 (cosine is
+invariant to multiplicative rescaling), but at a 100–300× separation the
+L2 metric is already unambiguous in identifying which positions are
+functionally untouched.
 
 ## 7. Discussion
 
@@ -370,6 +390,28 @@ forecast:
    the way — no positional confusion, just a hard wall at the highest
    trained place value.
 
+6. **The multi-seed run reveals where the original draft's point estimates
+   were misleading.** The 3→4 cliff and the drift boundary are reproducible
+   across seeds to the bit. But the intermediate-digit numbers — especially
+   `reversed` at 1- and 2-digit operands — vary by tens of percentage points
+   across seeds. The standard deviations in §6.1 should be read as
+   *warnings* on any narrative that distinguishes variants by single-digit
+   percentages: at this scale and compute budget, `reversed` could equally
+   well be reported as "9% accurate at 1-digit" or "56% accurate at 1-digit"
+   depending on the seed. The features that survive seed variation — the
+   3-digit ceiling, the 4-digit cliff, the drift boundary, and the
+   Abacus-curriculum extension to 5 digits — are the load-bearing findings
+   of the paper.
+
+7. **NoPE has an additional, separate failure: convergence stability.** Its
+   in-distribution 3-digit accuracy is 87.2 ± 6.9%, with one of three seeds
+   plateauing at 77.5%. Every other variant hits 100.0 ± 0.0 in distribution.
+   This is *not* a length-generalization story; it is a separate observation
+   that the inductive bias from causal masking alone is enough to *sometimes*
+   converge to a working arithmetic circuit but not always. Practical NoPE
+   deployments at this scale would need either more compute, multiple seed
+   reruns, or a small amount of positional information to be reliable.
+
 ## 8. Limitations
 
 This is a small-scale, single-task, single-seed study with a constrained
@@ -380,13 +422,13 @@ compute budget. Specifically:
   billion-parameter models without verification, particularly for NoPE and
   RoPE, where the inductive-bias arguments may behave differently with
   greater capacity.
-- **Compute.** The sweep ran on a CPU for ~70 minutes total, with each
-  variant trained for 4 epochs on a 100K-sample subset of the 3-digit grid
-  (50K for the mixed-digit curriculum). The full spec is 8 epochs on the
-  ~950K grid; absolute accuracies would shift upward with more training, and
-  it remains possible that NoPE and RoPE would extrapolate non-trivially
-  given enough optimization time. The qualitative ordering of variants is
-  expected to be robust.
+- **Compute.** The sweep ran on a CPU for ~3.4 hours total (3 seeds × 6
+  variants × 4 epochs on a 100K-sample subset of the 3-digit grid; 50K for
+  the mixed-digit curriculum). The full spec is 8 epochs on the ~950K
+  grid; absolute accuracies would shift upward with more training, and it
+  remains possible that NoPE and RoPE would extrapolate non-trivially given
+  enough optimization time. The qualitative ordering of variants and the
+  drift-cliff finding are bit-exact across seeds and expected to be robust.
 - **Task.** Addition is much easier than multiplication, and multiplication is
   much easier than (say) modular exponentiation. Multiplication is supported
   in the codebase but addition is the headline task because the failure
@@ -398,9 +440,11 @@ compute budget. Specifically:
   *shorter* but *unseen* length, not in-distribution accuracy. Future
   iterations should either stratify training data by digit count or report
   evaluations only at digit counts that the variant explicitly saw.
-- **Seeds.** Each variant is trained with a single seed. Error bars across
-  3–5 seeds would strengthen the claims, particularly the comparison
-  between NoPE / RoPE / clean Abacus at the cliff boundary.
+- **Seeds.** The sweep uses 3 random seeds, which is enough to give meaningful
+  error bars on the cliff-boundary comparison but not enough to detect rarer
+  failure modes (the NoPE convergence instability shows up as 1-of-3 here, so
+  the actual rate could be anywhere from ~10% to ~70% with reasonable
+  confidence). 5–10 seeds would tighten the variance estimates further.
 - **Decoding.** All evaluation uses greedy decoding. Beam search or
   temperature sampling may shift accuracy upward, particularly at the
   boundary of generalization.
