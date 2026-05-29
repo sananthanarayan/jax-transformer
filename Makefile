@@ -2,7 +2,7 @@ PYTHON ?= python
 SWEEP_JSON := results/sweep.json
 FIGURE := results/length_gen.png
 
-.PHONY: help install smoke test train sweep sweep-phase1 quick plot figures paper clean
+.PHONY: help install smoke test train sweep sweep-phase1 quick plot figures paper paper-serve clean
 
 help:
 	@echo "Targets:"
@@ -16,6 +16,7 @@ help:
 	@echo "  plot         Rebuild figures from results/sweep.json"
 	@echo "  figures      sweep + plot (the headline command)"
 	@echo "  paper        Render paper/whitepaper.md -> paper/whitepaper.html (needs pandoc)"
+	@echo "  paper-serve  paper + serve at http://localhost:8765 (images load reliably)"
 	@echo "  clean        Delete results/*.json and results/*.png"
 
 install:
@@ -54,7 +55,13 @@ paper:
 	  --css=whitepaper.css \
 	  --include-in-header=paper/header.html \
 	  -o paper/whitepaper.html
-	@echo "Wrote paper/whitepaper.html (open in browser; print-to-PDF if desired)"
+	@echo "Wrote paper/whitepaper.html"
+	@echo "View it with 'make paper-serve' (recommended — images load reliably)"
+	@echo "or open paper/whitepaper.html directly (some browsers block ../results/ images)"
+
+paper-serve: paper
+	@echo "Serving at http://localhost:8765/paper/whitepaper.html  (Ctrl-C to stop)"
+	@$(PYTHON) -m http.server 8765
 
 clean:
 	rm -f results/*.json results/*.png
