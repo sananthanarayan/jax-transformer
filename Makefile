@@ -2,7 +2,7 @@ PYTHON ?= python
 SWEEP_JSON := results/sweep.json
 FIGURE := results/length_gen.png
 
-.PHONY: help install smoke test train sweep sweep-phase1 quick plot figures paper paper-serve clean
+.PHONY: help install smoke test train sweep sweep-phase1 quick plot figures paper paper-html clean
 
 help:
 	@echo "Targets:"
@@ -15,8 +15,8 @@ help:
 	@echo "  quick        Run a fast sanity sweep (2 epochs, fewer eval samples)"
 	@echo "  plot         Rebuild figures from results/sweep.json"
 	@echo "  figures      sweep + plot (the headline command)"
-	@echo "  paper        Render paper/whitepaper.md -> paper/whitepaper.html (needs pandoc)"
-	@echo "  paper-serve  paper + serve at http://localhost:8765 (images load reliably)"
+	@echo "  paper        Render paper/whitepaper.md -> paper/whitepaper.pdf (the headline artifact)"
+	@echo "  paper-html   Render paper/whitepaper.md -> paper/whitepaper.html only"
 	@echo "  clean        Delete results/*.json and results/*.png"
 
 install:
@@ -48,7 +48,9 @@ plot: $(SWEEP_JSON)
 figures: sweep plot
 	@echo "Wrote $(FIGURE)"
 
-paper:
+CHROME ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+
+paper-html:
 	pandoc paper/whitepaper.md \
 	  --standalone \
 	  --metadata pagetitle="Length generalization, measured in the weights" \
@@ -56,12 +58,22 @@ paper:
 	  --include-in-header=paper/header.html \
 	  -o paper/whitepaper.html
 	@echo "Wrote paper/whitepaper.html"
-	@echo "View it with 'make paper-serve' (recommended — images load reliably)"
-	@echo "or open paper/whitepaper.html directly (some browsers block ../results/ images)"
 
-paper-serve: paper
-	@echo "Serving at http://localhost:8765/paper/whitepaper.html  (Ctrl-C to stop)"
-	@$(PYTHON) -m http.server 8765
+paper: paper-html
+	@TMPDIR_CHROME=$$(mktemp -d) && \
+	"$(CHROME)" \
+	  --headless=new \
+	  --disable-gpu \
+	  --no-sandbox \
+	  --allow-file-access-from-files \
+	  --user-data-dir="$$TMPDIR_CHROME" \
+	  --virtual-time-budget=15000 \
+	  --run-all-compositor-stages-before-draw \
+	  --print-to-pdf-no-header \
+	  --print-to-pdf="$$PWD/paper/whitepaper.pdf" \
+	  "file://$$PWD/paper/whitepaper.html" 2>&1 | tail -1 && \
+	rm -rf "$$TMPDIR_CHROME"
+	@echo "Wrote paper/whitepaper.pdf  (open paper/whitepaper.pdf to read)"
 
 clean:
 	rm -f results/*.json results/*.png
