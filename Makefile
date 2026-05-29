@@ -50,7 +50,7 @@ figures: sweep plot
 paper:
 	pandoc paper/whitepaper.md \
 	  --standalone \
-	  --metadata title="Length generalization in small arithmetic transformers" \
+	  --metadata title="Length generalization, measured in the weights" \
 	  --css=whitepaper.css \
 	  --include-in-header=paper/header.html \
 	  -o paper/whitepaper.html

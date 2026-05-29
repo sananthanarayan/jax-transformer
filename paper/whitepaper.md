@@ -1,6 +1,6 @@
-# Where do small transformers fail at multi-digit addition, and can the failure be seen directly in the weights?
+# Length generalization, measured in the weights: a controlled study of six positional encodings
 
-**A controlled comparison of positional encoding schemes on a 10M-parameter arithmetic transformer.**
+**A 10M-parameter arithmetic transformer, six positional-encoding schemes, three seeds — and a diagnostic that reads the failure mode directly off the trained weights.**
 
 *Sanjay Ananthanarayan · v0.4 · May 2026
 [github.com/sananthanarayan/jax-transformer](https://github.com/sananthanarayan/jax-transformer)*

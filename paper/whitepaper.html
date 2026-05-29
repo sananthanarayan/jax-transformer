@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>Length generalization in small arithmetic transformers</title>
+  <title>Length generalization, measured in the weights</title>
   <style>
     /* Default styles provided by pandoc.
     ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -110,15 +110,15 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">Length generalization in small arithmetic
-transformers</h1>
+<h1 class="title">Length generalization, measured in the weights</h1>
 </header>
 <h1
-id="where-do-small-transformers-fail-at-multi-digit-addition-and-can-the-failure-be-seen-directly-in-the-weights">Where
-do small transformers fail at multi-digit addition, and can the failure
-be seen directly in the weights?</h1>
-<p><strong>A controlled comparison of positional encoding schemes on a
-10M-parameter arithmetic transformer.</strong></p>
+id="length-generalization-measured-in-the-weights-a-controlled-study-of-six-positional-encodings">Length
+generalization, measured in the weights: a controlled study of six
+positional encodings</h1>
+<p><strong>A 10M-parameter arithmetic transformer, six
+positional-encoding schemes, three seeds — and a diagnostic that reads
+the failure mode directly off the trained weights.</strong></p>
 <p><em>Sanjay Ananthanarayan · v0.4 · May 2026 <a
 href="https://github.com/sananthanarayan/jax-transformer">github.com/sananthanarayan/jax-transformer</a></em></p>
 <p>Numbers in §6 are mean ± standard deviation over <strong>3
