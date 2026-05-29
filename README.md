@@ -1,21 +1,28 @@
-# jax transformer
+# Length generalization, measured in the weights
 
+A controlled study of six positional encodings on a small arithmetic transformer.
+**A ~10M-parameter decoder-only transformer in [JAX](https://github.com/google/jax) +
+[Flax NNX](https://flax.readthedocs.io/en/latest/nnx_basics.html), trained on 3-digit
+addition and tested at 1–6 digits.**
+
+[**📄 Read the whitepaper (PDF)**](paper/whitepaper.pdf) &nbsp;·&nbsp;
+[Latest release](https://github.com/sananthanarayan/jax-transformer/releases/latest) &nbsp;·&nbsp;
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sananthanarayan/jax-transformer/blob/main/notebooks/length_generalization.ipynb)
 
-A ~10M-parameter decoder-only transformer in [JAX](https://github.com/google/jax) +
-[Flax NNX](https://flax.readthedocs.io/en/latest/nnx_basics.html) that learns to add
-(and then multiply) up-to-3-digit numbers from scratch — and a controlled
-six-variant length-generalization sweep showing exactly which positional
-encodings fail when you push past the training distribution, and why.
+![Length generalization across six positional-encoding variants](results/length_gen.png)
 
-**Read the writeup first**: [`paper/whitepaper.md`](paper/whitepaper.md). It
-includes the headline chart, the per-digit-position heatmap, and the
-embedding-drift diagnostic that turns the abstract "positions stay at random
-init" story into a 100–300× separation you can read off the trained weights.
+**The finding in one sentence:** at this scale, *no* positional-encoding mechanism
+extrapolates past the training distribution by itself — NoPE, RoPE, and Abacus
+place-value embeddings all cliff to 0% accuracy at 4 digits exactly like a learned
+absolute embedding does. The only thing that generalizes is **place-value embeddings
+combined with a length curriculum** that exposes every digit position to gradient
+during training. An **embedding-drift diagnostic** (the L2 distance of each
+position-embedding row from its initialization) shows why, directly in the weights:
+rows for positions the model never saw stay at init, and accuracy collapses exactly
+where the drift collapses — bit-exact across three seeds.
 
-The whole thing is small enough to train in a few minutes on a single 14 GB GPU
-(e.g. Colab T4 / L4) and is meant as a clean, hackable starting point for
-arithmetic-reasoning experiments.
+The whole thing trains in a few minutes on a single 14 GB GPU (e.g. Colab T4 / L4)
+and is meant as a clean, hackable starting point for arithmetic-reasoning experiments.
 
 ## What it does
 

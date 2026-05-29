@@ -9,3 +9,6 @@ venv/
 checkpoints/
 *.npz
 *.msgpack
+
+# Generated intermediate from `make paper-html` (the PDF is the deliverable).
+paper/whitepaper.html
